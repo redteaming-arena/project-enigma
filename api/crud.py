@@ -411,11 +411,7 @@ async def create_game_session(*,
         # after it's been allocated to the game session 
         sample = registry.get_sampler(sample_fn.name)()
 
-        description=None
-        if game.metadata.game_rules.get("deterministic", False):
-            description = f"{game.session_description} {sample.get("kwargs", {}).get("target", "")}"
-        else:
-            description = f"{game.session_description}"
+        description = sample.get("custom_fields", {}).get("session_description", game.session_description)  # default from `game` definition
 
         new_session = GameSession(
             user_id=user_id,

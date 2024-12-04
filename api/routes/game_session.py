@@ -306,21 +306,22 @@ def model_generate_generator(
         model = session.model.name
         metadata = session.metadata
         validator = registry.get_validator(session.judge.validator.function.name)
+        deterministic = metadata.get("game_rules", {}).get("deterministic", False)
 
         client = Models.get_client(model)
 
         updates = {"history"}
         calmative_token = ""
 
-        if tool_enabled := metadata.model_config.get("models_config", {}).get("tools_config", {}).get("enabled", False):
-            stream = client.generate(session.history, model, tools=metadata.models_config.tools_config.tools)
+        if tool_enabled := metadata.get("models_config", {}).get("tools_config", {}).get("enabled", False):
+            stream = client.generate(session.history, model, tools=metadata.models_config.tools_config.get("tools", []))
         else:
             stream = client.generate(session.history, model)
 
         for token in stream.iter_tokens():
             calmative_token += token
             
-            if not tool_enabled and not session.outcome and validator(**{"source" : calmative_token} | metadata.kwargs):
+            if not tool_enabled and not session.outcome and deterministic and validator(**{"source" : calmative_token} | metadata.kwargs):
                 session.outcome = "win"
                 session.completed = True
                 session.completed_time = datetime.now(UTC)
@@ -335,7 +336,7 @@ def model_generate_generator(
         if functions_called and any(
             validator(
                 **{"source": calmative_token} |
-                metadata.get("kwargs", {}) |
+                metadata.kwargs |
                 {"function_call_name": func.name, "function_call_arguments": func.argument}
             ) for func in functions_called
         ):
