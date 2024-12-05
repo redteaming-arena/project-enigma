@@ -19,7 +19,7 @@ import requests
 import base64
 from urllib.parse import quote
 from datetime import datetime, timedelta, UTC
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -82,6 +82,7 @@ async def login_access_token(
                 expires_delta=access_token_expires
             )
         
+            # NOTE: Move this to crud.py
             update_result = await db.users.update_one(
                     {"_id": user.id},
                     {"$set": {"access_token": access_token, "last_login" : datetime.now(UTC) }}
@@ -97,11 +98,13 @@ async def login_access_token(
             access_token=access_token
         )
 
-    except Exception as e:
-        print(e)
+
+    except HTTPException as e:
+        raise e
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error while updating token"
+            detail="Server side error, please try again later"
         )
 
 @router.get("/token", response_model=Message, tags=["Auth"])
@@ -123,10 +126,11 @@ async def test_token(user: CurrentUser) -> Message:
     
     return Message(
         status=status.HTTP_200_OK,
-        message="token is valid",
-        data=UserPublic(
+        message="Valid session token",
+        data=dict(
             username=user.username,
-            ).model_dump()
+            image=f"/avatar/{user.id}"
+        )
     )
 @router.get("/auth/{provider}", tags=["Auth"])
 def oauth_provider_sign_in(
@@ -155,6 +159,11 @@ def oauth_provider_sign_in(
         return RedirectResponse(
             url=auth_url,
             status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That provider does not exist"
         )
 
 @router.get("/callback/oauth/{provider}", tags=["Callback"])
@@ -272,10 +281,10 @@ async def callback(
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to update user token"
-                    )
+                        )
                 user.access_token = new_access_token
             
-            
+        
         except (requests.exceptions.RequestException, Exception) as e:
             logger.error(f"Error: {str(e)}")
             html_content = html_content % ("authError")
@@ -298,4 +307,3 @@ async def callback(
                 secure=settings.ENVIRONMENT == "production",  # Set secure flag based on environment
             )
     return response
-    

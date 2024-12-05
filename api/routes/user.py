@@ -21,13 +21,14 @@ import io
 import httpx
 import base64
 
+
 from bson import ObjectId
 from bson.errors import InvalidId
 
 from pydantic import ValidationError
 
 from fastapi import APIRouter, Query, HTTPException, status
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 
 from api import crud
 from api.deps import (
@@ -36,7 +37,7 @@ from api.deps import (
     clear_user_token,
 )
 from api.models import (
-    User, 
+    UserStats,
     UserRegister, 
     UserPublic,
     Message
@@ -63,20 +64,28 @@ async def register_user(db : Database, user_in : UserRegister) -> Message:
         HTTPException (400): If the username is already taken
     
     """
-    user = await crud.find_user(db=db, 
-                                username=user_in.username)
-    if user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Interrupt the user with this username already exists in the system.",
+    try:
+        user = await crud.find_user(db=db, 
+                                    username=user_in.username)
+        if user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Interrupt the user with this username already exists in the system.",
+            )
+        
+        await crud.create_user(db=db, user_create=user_in)
+        return Message(
+            status=status.HTTP_201_CREATED,
+            message=f"{user_in.username} was successfully created",
+            data=True
         )
-    
-    await crud.create_user(db=db, user_create=user_in)
-    return Message(
-        status=status.HTTP_201_CREATED,
-        message=f"{user_in.username} was successfully created",
-        data=True
-    )
+    except HTTPException as h:
+        raise h
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Server Error: {str(e)}"
+        )
 
 @router.post("/logout")
 async def logout(
@@ -102,6 +111,8 @@ async def logout(
     try:
         await clear_user_token(db, user.id)
         
+    except HTTPException as h:
+        raise h
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -159,11 +170,13 @@ async def update_username(db: Database, user: CurrentUser, username: str):
             }
         )
     
-    except Exception as e:
+    except HTTPException as h:
+        raise h
+    except Exception:
         # Handle database errors
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update username"
+            detail="Server Error: Failed to update username"
         )
 
 
@@ -188,24 +201,32 @@ async def is_available_username(db : Database,
         HTTPException (400): If the username is already taken
     """
 
+    try:
 
-    user = await crud.find_user(db=db, username=username)
 
-    if user is not None and user.provider is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="You must login via your provider."
+        user = await crud.find_user(db=db, username=username)
+
+        if user is not None and user.provider is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="You must login via your provider."
+            )
+
+        message = f"{username} is currently available" if user is None\
+                    else f"Username is currently taken"
+        
+        return Message(
+            message=message,
+            status=status.HTTP_200_OK,
+            data=user is None
         )
-
-    message = f"{username} is currently available" if user is None\
-                else f"Username is currently taken"
-    
-    return Message(
-        message=message,
-        status=status.HTTP_200_OK,
-        data=user is None
-    )
-
+    except HTTPException as h:
+        raise h
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server Error: Failed check if username is available"
+        )
 
 @router.get("/user", response_model=UserPublic)
 async def read_user_by_id(
@@ -230,8 +251,7 @@ async def read_user_by_id(
         HTTPException (422): If the retrieved user data fails validation
     """
     try:
-
-        
+        # NOTE: Move this to crud function
         # Combined query using aggregation
         pipeline = [
             {"$match": {"_id": user.id}},
@@ -246,11 +266,11 @@ async def read_user_by_id(
                     "$match": {
                     "$expr": { "$eq": ["$user_id", "$$user_id"] },
                     "completed": True,
+                    "visible" : True,
                     "$and": [
                         { "history": { "$exists": True } }, 
                         { "history": { "$not": { "$size": 0 } } }
-                        ]
-                    # "outcome": { "$ne": "forfeit" }
+                        ],
                     }
                 },
                 {
@@ -296,7 +316,6 @@ async def read_user_by_id(
             {"$project": {
                 "id": {"$toString": "$_id"},
                 "username": 1,
-                "image": 1,
                 "history": 1,
                 "pinned" : {
                     "id" : 1,
@@ -320,15 +339,16 @@ async def read_user_by_id(
         return UserPublic(
             id=user_dict.get("id", None),
             username=user_dict.get("username", None),
-            image=user_dict.get("image", None),
             history=user_dict.get("history", []) ,
             pinned=user_dict.get("pinned", [])
         )
 
+    except HTTPException as h:
+        raise h
     except InvalidId:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Interrupt invalid user ID format"
+            detail=f"{id} is an invalid user ID"
         )
     except ValidationError as e:
         print
@@ -383,7 +403,9 @@ async def update_pinned_games(
             "pinned": True,
             "game_id": str(game_object_id)
         }
-        
+    
+    except HTTPException as h:
+        raise h
     except InvalidId:
         raise HTTPException(status_code=400, detail="Invalid game ID format")
     except Exception as e:
@@ -397,8 +419,6 @@ async def unpin_game(
 ):
     try:
         # Validate game_id format and convert to ObjectId
-        if not ObjectId.is_valid(game_id):
-            raise HTTPException(status_code=400, detail="Invalid game ID format")
         game_object_id = ObjectId(game_id)
         
         # Remove pin
@@ -419,13 +439,29 @@ async def unpin_game(
             "pinned": False,
             "game_id": str(game_object_id)
         }
-        
-    except InvalidId:
-        raise HTTPException(status_code=400, detail="Invalid game ID format")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
     
+    except HTTPException as h:
+        raise h
+    except InvalidId:
+        raise HTTPException(status_code=400, detail=f"{game_id} Invalid game ID format")
+    except Exception:
+        raise HTTPException(status_code=500,
+                            detail=f"Server Error: unable to unpin game, try again later")
 
+
+@router.get('/stats')
+async def user_stats(
+        current_user : CurrentUser,
+        db : Database
+) -> UserStats:
+    try:
+        stats = await crud.user_stats(db=db, user_id=current_user.id)
+        return stats
+    except HTTPException as h:
+        raise h
+    except Exception:
+        raise HTTPException(status_code=500,
+                            detail=f"Server Error: unable retrieve stats")
 
 @router.get('/avatar/{id}')
 async def get_avatar(db: Database, id: str):
@@ -488,14 +524,16 @@ async def get_avatar(db: Database, id: str):
             io.BytesIO(image),
             media_type='image/webp'
         )
-
+    
+    except HTTPException as h:
+        raise h
     except InvalidId:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{id} is an invalid user ID"
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while retrieving the avatar"
+            detail="Server Error: failed to retrieving the avatar"
         )

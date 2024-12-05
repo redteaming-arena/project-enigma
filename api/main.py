@@ -13,7 +13,7 @@ from api.routes import (login,\
                         game_session,\
                         health)
 from api.backend_ping_test import db_ping_server
-from api.cron import compute_leaderboard, check_model_tokens_usage, history_garbage_collection
+from api.cron import compute_leaderboard, history_garbage_collection
 from api.deps import close_database
 from api.utils import logger
 
@@ -47,7 +47,8 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url="/openapi.json",
     generate_unique_id_function=custom_generate_unique_id,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
 )
 
 if settings.all_cors_origins:
@@ -62,7 +63,7 @@ if settings.all_cors_origins:
 
 app.include_router(login.router)
 app.include_router(user.router,  tags=["User"])
-app.include_router(game.router, prefix="/game", tags=["Game"])
+app.include_router(game.router, tags=["Game"])
 app.include_router(models.router, prefix="/model", tags=["Model"])
 app.include_router(game_session.router)
 app.include_router(health.router)

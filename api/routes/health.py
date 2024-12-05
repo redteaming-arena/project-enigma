@@ -1,21 +1,21 @@
 import time
-import urllib.parse
 import aiohttp
 import asyncio
-import urllib
-from datetime import datetime, UTC
+
+from urllib import parse
 from typing import Dict, Any
+from datetime import datetime, UTC
 
-
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request
 
 from api.core.config import settings
+from api.backend_ping_test import db_ping_server
 
-async def check_model_service(model_endpoint: str) -> Dict[str, str]:
+async def check_model_service(url : str, model_endpoint: str) -> Dict[str, str]:
+    """ helper function that pings public services """
     try:
         
-        base_url = f"{settings.FRONTEND_HOST}/api/"
-        endpoint = urllib.parse.urljoin(base_url, model_endpoint)
+        endpoint = parse.urljoin(url, model_endpoint)
         async with aiohttp.ClientSession() as session:
             start_time = time.time()
             async with session.get(endpoint, timeout=5) as response:
@@ -26,21 +26,22 @@ async def check_model_service(model_endpoint: str) -> Dict[str, str]:
                     "latency": f"{(end_time - start_time):.2f}s"
                 }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-from api.backend_ping_test import db_ping_server
+        return {"endpoint" : endpoint, "status": "error", "message": str(e)}
 
 router = APIRouter()
 
 @router.get("/health/")
-async def health_check() -> Dict[str, Any]:
+async def health_check(request : Request) -> Dict[str, Any]:
+    """ check the health of mongodb latency and ping public routes """
     start_time = datetime.now(UTC)
-    
+    base_url = str(request.base_url)
     # Run all health checks concurrently
+    ping = await db_ping_server()
+    
     checks = await asyncio.gather(
-        db_ping_server(),
-        check_model_service("game/?s=0"),
-        return_exceptions=True
+        check_model_service(base_url, f"game/?s=0"),
+        check_model_service(base_url, f"model"),
+        return_exceptions=False
     )
     
     end_time = datetime.now(UTC)
@@ -51,12 +52,10 @@ async def health_check() -> Dict[str, Any]:
         "timestamp": datetime.now(UTC).isoformat(),
         "response_time": f"{response_time:.2f}s",
         "services": {
-            "mongoDB": checks[0],
-            "dependencies": {
-                "model_service": checks[1]
-            },
+            "mongoDB": ping,
+            "endpoints" : [{ "service" : check } for check in checks],
             "api": {
-                "version": "1.0.0",  # Replace with your API version
+                "version": "0.1.0", 
             }
         },
         "environment": settings.ENVIRONMENT  # Add this during app initialization

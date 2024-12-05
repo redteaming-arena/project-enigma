@@ -196,6 +196,91 @@ async def authenticate(*, db : Database, username : str, password : str) -> Opti
     if not verify_password(password, user.password):
         return None
     return user
+
+async def user_stats(*, db : Database, user_id : str | ObjectId):
+    """ user states such as games played list of sessions """
+    try :
+        
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id) 
+        
+        user = await db.users.aggregate([
+            {
+                "$match": {
+                    "_id": user_id 
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0, 
+                    "games_played": {
+                        "$ifNull": ["$games_played", -1]
+                    }
+                }
+            }
+        ]).to_list(length=1)
+
+        user = user[0] if user else None
+
+        pipeline = [
+            {
+                "$match": { 
+                    "user_id": user_id,
+                    "completed": True
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "agent_id",
+                    "foreignField": "_id",
+                    "as": "model"
+                }
+            },
+                        {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_id",
+                    "foreignField": "_id",
+                    "as": "user"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$model",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },{
+                "$unwind": {
+                    "path": "$user",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "completed_time": 1,
+                    "outcome": 1,
+                    "provider" : "$model.provider",
+                }
+            }
+        ]
+
+        sessions = await db.sessions.aggregate(pipeline).to_list(length=None)
+
+        # In case where games_played does not exist early users...
+        games_played = max(0, len(sessions))
+        if user["games_played"] < 0:
+            await db.users.update_one(
+                {"_id": user_id},
+                {"$set": {"games_played": games_played}}
+            )
+        
+        result = dict(games_played=games_played, sessions=sessions)
+        return result
+
+    except Exception as e:
+        raise e
 # =====================================================================
 
 # NOTE add more 
@@ -288,8 +373,9 @@ async def get_games(*, db: Database, skip : int = 0, limit : int | None= None ) 
 
 async def create_game_session(*, 
                               db: Database, 
+                              game : Game,
+                              judge : Judge,
                               user_id:  Union[str, ObjectId], 
-                              game_id:  Union[str, ObjectId],
                               model_id: Union[str, ObjectId]) -> GameSession:
     """
     Creates new game session in database
@@ -309,83 +395,29 @@ async def create_game_session(*,
     try:
 
         user_id  = to_object_id(user_id)
-        game_id  = to_object_id(game_id)
         model_id = to_object_id(model_id)
+        game_id = to_object_id(game.id)
+        judge_id = to_object_id(judge.id)
 
-        # get the full game object
-        game = await db.games.aggregate([
-            {
-                "$match": {
-                    "_id": game_id
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "judges",
-                    "localField": "judge_id",
-                    "foreignField": "_id",
-                    "as": "judge"
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "models",
-                    "localField": "agent_id",
-                    "foreignField": "_id",
-                    "as": "model"
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$judge",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$model",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },{
-                "$project": {
-                    "metadata": 1,
-                    "judge_id": 1,
-                    "model": {
-                        "name": 1,
-                        "image": 1
-                    },
-                    "session_description": 1,
-                    "judge": {
-                        "sampler": 1
-                    }
-                }
-            },
-            {
-                "$limit": 1
-            }
-        ]).to_list(length=None)
-        game = game.pop(0)
-        if (sample_fn := game["judge"].get("sampler", {}).get("function", None)) is None:
+        if (sample_fn := judge.sampler.function) is None:
             raise HTTPException(
                 status_code=500,
                 detail="Missing sampler function"
             )
 
-
         # we need to sample from out game distribution sample function.
         # Properties a sampler should hold if game needs to change model
         # configurator then we need to add a meta data object to which it will be deleted
         # after it's been allocated to the game session 
-        sample = registry.get_sampler(sample_fn["name"])()
-
+        sample = registry.get_sampler(sample_fn.name)()
 
         description=None
-        if game["metadata"].get("game_rules", {}).get("deterministic", False):
-            description = f"{game["session_description"]} {sample.get("kwargs", {}).get("target", "")}"
+        if game.metadata.game_rules.get("deterministic", False):
+            description = f"{game.session_description} {sample.get("kwargs", {}).get("target", "")}"
         else:
-            description = f"{game["session_description"]}"
+            description = f"{game.session_description}"
 
-        metadata = game["metadata"]
+        metadata = game.metadata.model_dump(exclude_none=True)
         if "kwargs" in sample:
             metadata["kwargs"] = sample["kwargs"]
         if "model_config" in sample:
@@ -394,26 +426,28 @@ async def create_game_session(*,
         new_session = GameSession(
             user_id=user_id,
             game_id=game_id,
-            judge_id=game.get("judge_id", None),
+            judge_id=judge_id,
             agent_id=model_id,
             description=description,
             history=list(),
             completed=False,
+            visible=True,
             create_time=datetime.now(UTC),
             completed_time=None,
             outcome=None,
             shared=None,
-            metadata=metadata,
-        ).model_dump()
+            metadata=metadata).model_dump()
 
         
+        result = await db.sessions.insert_one(new_session\
+                                              .create_session()) 
 
-        del new_session["id"]
-        del new_session["user"]
-        del new_session["judge"]
-        del new_session["model"]
-        result = await db.sessions.insert_one(new_session) 
-        new_session["session_id"] = str(result.inserted_id)
+        new_session.id = result.inserted_id
+        if game:
+            await db.users.update_one(
+                {"_id": user_id},  # Match the game by its _id
+                {"$inc": {"games_played": 1}}  # Increment games_played by 1
+            )
 
     except InvalidId:
         logger.error(e)
@@ -427,7 +461,7 @@ async def create_game_session(*,
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Something else went wrong"
         )
-    return GameSession(**new_session)
+    return new_session
 
 
 async def delete_game_session(db : Database, session_id: str) -> None:
@@ -490,6 +524,7 @@ async def get_session_from_shared_id(*, shared_id: str, db: Database):
                 "outcome": 1,
                 "completed_time": 1,
                 "create_time": 1,
+                "description" : 1,
                 "user": {
                     "username" : 1,
                 },
@@ -531,6 +566,7 @@ async def get_session(*,
         query["_id"] = ObjectId(session_id)
         if user_id is not None:
             query["user_id"] = user_id
+            query["visible"] = True
 
         if completed is not None:    
             query["completed"] = completed
@@ -680,7 +716,8 @@ async def get_sessions_for_user(user_id: str | ObjectId, db: Database, skip : in
 
     query = db.sessions.find({
         "user_id": user_id,
-        "completed": True
+        "completed": True,
+        "visible" : True
     }).skip(skip=skip)
     
     if limit is not None:
@@ -728,8 +765,31 @@ async def get_models(db : Database) -> List[Model]:
         response.append(Model(**model))
     return response
 
+async def get_models_dependent_on_game(db : Database,
+                                       game : Game) -> List[Model]:
+     
+     # Build the query
+    query = {"available": True}
+    if game.metadata.game_rules.get("tools_enabled", False):
+        query["tools"] = True  
 
-async def get_random_model_id(db : Database) -> ObjectId:
+    models = await db.models.find(query).to_list(None)
+    
+    if models is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No available models found in the database"
+        )
+
+    response = []
+    for model in models:
+        model["id"] = model['_id']
+        del model['_id']
+        response.append(Model(**model))
+    return response
+
+
+async def get_random_model_id(db : Database, game : Game) -> ObjectId:
     """
     Fetch a random model ID from the Models collection.
 
@@ -739,7 +799,8 @@ async def get_random_model_id(db : Database) -> ObjectId:
         str: The ID of the randomly selected model
     """
 
-    models : List[Model] = await get_models(db=db)
+    models : List[Model] = await get_models_dependent_on_game(db=db, 
+                                                              game=game)
 
     if not models:
         raise HTTPException(
@@ -749,13 +810,14 @@ async def get_random_model_id(db : Database) -> ObjectId:
     
 
     selected_model = random.choice(models)
-    print(selected_model.id)
+
     if (id := selected_model.id) is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Not a valid model"
         )
     return id
+
 
 def get_model_client_from_provider(provider : str):
     ...
