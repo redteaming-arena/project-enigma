@@ -2,7 +2,7 @@
 
 Before you begin, ensure you have the following installed:
 - [Python](https://python.org/) (3.8 or higher)
-- [Node.js](https://nodejs.org/) (14.x or higher)
+- [Node.js](https://nodejs.org/) (23.x or higher)
 - [MongoDB](https://www.mongodb.com/) account
 - Git
 
@@ -23,7 +23,7 @@ Before we run any code we need to set up a MongoDB account and make sure free cl
 
 1. Copy the `config.test.env` file to create a new `.env` file:
    ```bash
-   cp .env.example .env
+   cp config.test.env .env
    ```
 
 2. Fill in the MongoDB settings in your `.env` file:
