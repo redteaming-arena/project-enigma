@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI : str = os.getenv("GOOGLE_REDIRECT_URI", "")
     GOOGLE_CLIENT_SECRET : str = os.getenv("GOOGLE_CLIENT_SECRET", "")
 
+    # elo ranking
+    ELO_SCALE : int = 3000
+    K : float = 1.0
+
+
     @computed_field
     @property
     def MONGODB_DATABASE_URI(self) -> str:

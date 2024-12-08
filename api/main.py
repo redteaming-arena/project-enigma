@@ -11,9 +11,10 @@ from api.routes import (login,\
                         game,\
                         models,\
                         game_session,\
-                        health)
+                        health,\
+                        leaderboard)
 from api.backend_ping_test import db_ping_server
-from api.cron import compute_leaderboard, history_garbage_collection
+from api.cron import compute_leaderboard
 from api.deps import close_database
 from api.utils import logger
 
@@ -30,7 +31,7 @@ async def lifespan(_app : FastAPI):
     # NOTE: before the server starts run these functions
     try :
         await db_ping_server()
-        await history_garbage_collection()
+        await compute_leaderboard()
 
     except Exception as e:
         raise e
@@ -67,3 +68,4 @@ app.include_router(game.router, tags=["Game"])
 app.include_router(models.router, prefix="/model", tags=["Model"])
 app.include_router(game_session.router)
 app.include_router(health.router)
+app.include_router(leaderboard.router)
