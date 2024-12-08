@@ -149,16 +149,6 @@ export function GameDetails({ game }: GameDetailsProps) {
                 {game.description}
               </p>
             </div>
-            <Separator />
-            <div>
-              <h2 className="text-xl font-semibold mb-2">Gameplay</h2>
-              <p className="text-gray-300 leading-relaxed">{game.gameplay}</p>
-            </div>
-            <Separator />
-            <div>
-              <h2 className="text-xl font-semibold mb-2">Objective</h2>
-              <p className="text-gray-300 leading-relaxed">{game.objective}</p>
-            </div>
           </div>
         </CardContent>
       </Card>

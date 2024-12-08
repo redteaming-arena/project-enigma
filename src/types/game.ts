@@ -27,8 +27,6 @@ interface GameData {
     title: string;
     author?: string[];
     description?: string;
-    gameplay?: string;
-    objective?: string;
     image?: string;
     created_at?: string; // ISO timestamp
     updated_at?: string | null; // Nullable for cases where updated_at might not be set

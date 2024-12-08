@@ -14,7 +14,7 @@ export function GameSettings({ game }: GameSettingsProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Game Settings</CardTitle>
+        <CardTitle>Parameters Settings</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-4">
@@ -34,14 +34,6 @@ export function GameSettings({ game }: GameSettingsProps) {
             <p className="text-sm font-medium">Tools Enabled</p>
             <p className="text-sm text-gray-600">
               {game.metadata.model_config.tools_config.enabled ? "Yes" : "No"}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Time Limit</p>
-            <p className="text-sm text-gray-600">
-              {game.metadata.game_rules.timed
-                ? `${game.metadata.game_rules.time_limit / 60}s`
-                : "No limit"}
             </p>
           </div>
           <div className="space-y-1">

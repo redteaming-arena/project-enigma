@@ -63,7 +63,7 @@ export function GameHeader({ game }: GameHeaderProps) {
               <div className="flex items-center gap-1 text-gray-600">
                 <Clock className="w-4 h-4" />
                 <span className="text-sm">
-                  {game.metadata.game_rules.time_limit / 1000}s
+                  {game.metadata.game_rules.time_limit / 60}s
                 </span>
               </div>
             )}
