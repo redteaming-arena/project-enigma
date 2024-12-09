@@ -268,8 +268,6 @@ class Game(BaseModelWithUtils):
     title: str
     author: List[str] = Field(default_factory=list)
     description: Optional[str] = None
-    gameplay: Optional[str] = None
-    objective: Optional[str] = None
     image: Optional[HttpUrl | str] = None  # Removed Union with str for clearer validation
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
