@@ -1,4 +1,5 @@
 import os
+from api.utils import logger
 from typing import Any, Dict, List
 from .types import CompletionResponse
 from .factory import CompletionFactory
@@ -67,6 +68,7 @@ class Client:
             **kwargs
         ) -> CompletionResponse:
             """Generate a completion using the appropriate strategy"""
+            logger.info(f"LLM create_completion: messages {messages}")
             return self._strategy.create_completion(
                 messages=messages,
                 stream=stream,

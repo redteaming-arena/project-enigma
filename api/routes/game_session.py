@@ -314,10 +314,15 @@ def model_generate_generator(
         
         tools_config = metadata.models_config.get("tools_config", {})
         system_prompt = metadata.models_config.get("system_prompt", "")
-        if tool_enabled := metadata.model_config.get("models_config", {}).get("tools_config", {}).get("enabled", False):
-            stream = client.generate(session.history, model, tools=metadata.models_config.tools_config.tools)
+        history = session.history
+        if system_prompt:
+            history = [{"role": "system", "content": system_prompt}] + history
+
+        if tool_enabled := tools_config.get("enabled", False):
+            stream = client.generate(history, model, tools=tools_config.get("tools", []))
         else:
-            stream = client.generate(session.history, model)
+            stream = client.generate(history, model)
+        
 
         for token in stream.iter_tokens():
             calmative_token += token
@@ -346,13 +351,7 @@ def model_generate_generator(
             session.completed_time = datetime.now(UTC)
             updates = updates | {"completed", "outcome", "completed_time"}
 
-        yield "{payload}\n".format(
-                payload=json.dumps(dict(event="end", 
-                                        outcome="playing"\
-                                        if session.outcome is None\
-                                        else session.outcome)
-                                )
-            )
+
     finally:
         session.history.append({"role": "assistant", "content": calmative_token }) 
         background.add_task(crud.update_game_session,
