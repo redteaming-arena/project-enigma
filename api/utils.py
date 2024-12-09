@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 import asyncio
 import logging
@@ -11,10 +12,12 @@ from functools import wraps
 from io import BytesIO
 from functools import wraps
 from traceback import format_exception
-from typing import Any, Callable, Coroutine, Union, Generator
+from typing import Any, Callable, Coroutine, Union, Generator, List, Tuple
 from datetime import datetime, UTC
 import numpy as np
 from PIL import Image
+
+from collections.abc import Buffer
 
 from starlette.concurrency import run_in_threadpool
 
@@ -22,6 +25,10 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from api.models import StreamResponse
+
+from api.models import User
+
+logger = logging.getLogger('uvicorn.error')
 
 NoArgsNoReturnFuncT = Callable[[], None]
 NoArgsNoReturnAsyncFuncT = Callable[[], Coroutine[Any, Any, None]]
@@ -226,9 +233,7 @@ def to_object_id(id : str | ObjectId) -> ObjectId:
         return id
     except InvalidId as e:
         raise e
-
-
-logger = logging.getLogger('uvicorn.error')
+    
 
 def handleStreamResponse(
     *,
@@ -273,4 +278,21 @@ def handleStreamResponse(
                 }
         return wrapper
     return decorator
+
+
+def convert_list_to_one_hot_vector(*x : Tuple[int, ...]):
+    """convert list of int to a one hot vector representation
+
+    Returns:
+        _type_: _description_
+    """
+    if len(x) == 0:
+        return None
     
+    a = np.array(x)
+    row, col = a.size, int(a.max()) + 1 
+    b = np.zeros((row, col))
+    x = np.arange(row)
+    b[x, a] = 1
+    return b
+

@@ -9,7 +9,7 @@ from fastapi import APIRouter, \
 from fastapi.responses import StreamingResponse
 from pymongo.results import UpdateResult
 
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from zoneinfo import ZoneInfo
 
 from api import crud
@@ -480,19 +480,15 @@ async def get_history(
         List[GameSessionHistoryResponse]: List of completed game sessions with session_id, target, outcome, duration.
     """
     try:
-        # Fetch the sessions from the database
         sessions = await crud.get_sessions_for_user(user_id=current_user.id, db=db, skip=s, limit=l)
 
-        # Prepare the session history data
         session_history = [
             GameReadOnly.from_game_session(session)
             for session in sessions
         ]
     except Exception as e:
-        # Raise an error if something goes wrong
         raise e
     
-    # Return the session history as a JSON response
     return session_history
 
 @router.get("/chat_conversation/{shared_id}", tags=["Shared"])
@@ -641,3 +637,4 @@ async def get_session_history(
 @router.delete('/all')
 async def all_session(db : Database):
     await db.sessions.delete_many({})
+

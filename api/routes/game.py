@@ -40,32 +40,6 @@ async def get_all_games(
     except HTTPException as e:
         raise e
     
-@router.get("/game/stream")
-async def get_all_games_stream(
-    db : Database,
-    s : int,
-    l : Optional[int] = None
-):
-    """
-    Get all games and convert them to GamePublic model.
-    Accessible via both /game/ and /game
-    """
-
-    async def stream_games():
-        async for game in get_games(db=db, skip=s, limit=l):
-            yield "{payload}".format(
-                    payload=json.dumps(dict(event="message", content=Game(
-                        id=str(game.id),
-                        title=game.title,
-                        image=str(game.image)
-                        ).model_dump(mode="json", exclude_none=True))
-                    )
-                )
-            await asyncio.sleep(2.0)
-            
-    return EventSourceResponse(stream_games())
-
-
 
 @router.get("/game/{id}")
 async def game_from_id(db : Database, id : str) -> Any:

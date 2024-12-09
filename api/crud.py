@@ -25,7 +25,7 @@ import re
 
 
 from typing import Optional, List, Union, AsyncGenerator
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 
 from fastapi import HTTPException, status
 
@@ -37,7 +37,8 @@ from api.models import User,\
                        GameSession,\
                        GameSessionPublic,\
                        Model,\
-                       Judge
+                       Judge,\
+                       Leaderboard
 from api.judge import registry
 from api.utils import generate, to_object_id, logger
 from bson import ObjectId
@@ -869,3 +870,228 @@ async def get_judge_from_id(*,
         )
 
 # =====================================================================
+
+# Leaderboard
+
+async def fetch_and_process_leaderboard_data(
+    *,
+    db: Database,
+    last_snapshot: datetime,
+    current_snapshot: timedelta,
+):
+    try:
+
+
+        # Time range for sessions
+        time_range = {
+            "$gte": last_snapshot,
+            "$lt":  current_snapshot,
+        }
+
+        # Step 2: Aggregate session data
+        pipeline = [
+            {"$match": {"completed": True, "completed_time": time_range}},
+            {"$addFields": {
+                "target": {
+                    "$cond": {
+                        "if": {"$eq": ["$metadata.game_rules.deterministic", True]},
+                        "then": "$metadata.kwargs.target",
+                        "else": None
+                    }
+                },
+                "system_prompt": {
+                    "$cond": {
+                        "if": {
+                            "$and": [
+                                {"$ne": ["$metadata.models_config.system_prompt", None]},
+                                {"$ne": ["$metadata.models_config.system_prompt", ""]}
+                            ]
+                        },
+                        "then": "$metadata.models_config.system_prompt",
+                        "else": None
+                    }
+                }
+            }},
+            {"$lookup": {
+                "from": "models",
+                "localField": "agent_id",
+                "foreignField": "_id",
+                "as": "model_info"
+            }},
+            {"$unwind": {"path": "$model_info", "preserveNullAndEmptyArrays": True}},
+            {"$group": {
+                "_id": "$game_id",
+                "sessions": {
+                    "$push": {
+                        "session_id": {"$toString": "$_id"},
+                        "user_id": "$user_id",
+                        "outcome": "$outcome",
+                        "target": "$target",
+                        "system_prompt": "$system_prompt",
+                        "model": "$model_info._id"
+                    }
+                }
+            }},
+            {
+                "$project": {
+                    "_id": 0,
+                    "game_id": "$_id",
+                    "sessions": 1
+            }}
+        ]
+        sessions = await db.sessions.aggregate(pipeline=pipeline)\
+                                    .to_list(length=None)
+
+        game_ids = [ s["game_id"] for s in sessions ]
+
+        # Step 1: Fetch leaderboard data
+        leaderboards = await db.leaderboards.find({
+            "game_id" : { "$in" : game_ids } 
+        }).to_list(None)
+
+        leaderboard = { l["game_id"] : l for l in leaderboards }
+
+        if not leaderboards and len(leaderboards) == 0:
+            yield None
+        
+
+        # NOTE: rename me to a better function name
+        def unique_objects(game : dict):
+            unique_users =   {user['user_id'] for user in game['sessions']}
+            unique_models =  {user['model']   for user in game['sessions']}
+            unique_targets = {user['target']  for user in game['sessions']}
+            return unique_users, unique_models, unique_targets
+        
+    
+        for game in sessions:
+            users, models, targets = unique_objects(game)
+            yield (list(targets), list(users), list(models), game, leaderboard[game["game_id"]])
+
+    except Exception as e:
+        logger.error(e)
+        raise e
+
+# NOTE: Deprecate this when Abstract games 
+async def get_leaderboards(db : Database):
+    
+    try:
+        leaderboards = await db.leaderboards.find({}).to_list(None)
+        if leaderboards is None or len(leaderboards) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No leaderboard found"    
+            )
+        
+        return leaderboards
+    except HTTPException as h:
+        raise h
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something occurred"
+        )
+
+
+
+async def get_leaderboard_from_game_id(game_id : ObjectId, 
+                                       db : Database,
+                                       skip : int =0,
+                                       limit: int = 0) -> dict:
+    """get leaderboard latest snapshot from mongodb"""
+    try :
+        leaderboard = await db.leaderboards.aggregate([
+            { 
+                "$match": { 
+                    "game_id": game_id 
+                }
+            },
+            # {
+            #     "$unwind" : "$models"
+            # },
+            {
+                "$unwind": "$players"  # Deconstruct the players array to prepare for lookup
+            },
+            {
+                "$lookup": {
+                    "from": "users",  # Collection to join with
+                    "localField": "players.id",  # Field in players to match with users
+                    "foreignField": "_id",  # Field in users to match against
+                    "as": "user_details"  # Name for the joined data
+                }
+            },
+            {
+                "$unwind": "$user_details"  # Flatten the user_details array
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": { "$toString": "$_id" },  # Convert leaderboard _id to string
+                    "game_id": { "$toString": "$game_id" },  # Convert game_id to string
+                    "last_snapshot": 1,
+                    "mean" : 1,
+                    "player": {
+                        "id": { "$toString": "$players.id" },  # Convert ObjectId to string
+                        "elo": "$players.elo",
+                        "username": "$user_details.username",
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "id": { "$toString" : "$id" },
+                        "game_id": { "$toString" : "$game_id"},
+                        "last_snapshot": "$last_snapshot",
+                        "mean" : "$mean",
+                    },
+                    "players": { "$push": "$player" } 
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": "$_id.id",
+                    "game_id": "$_id.game_id",
+                    "mean": "$_id.mean",
+                    "last_snapshot": "$_id.last_snapshot",
+                    "players": { "$slice" : [ "$players", max(0, skip), max(skip + 1, limit) ] } ,
+                }
+            }
+        ]).next()
+        if leaderboard is None or len(leaderboard) == 0:
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No leaderboard found under {str(game_id)}"    
+            )
+
+
+
+        return leaderboard
+    except HTTPException as h:
+        raise h
+    except Exception as e:
+        logger.error(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something on server end could not complete this call"
+        )
+    
+
+
+# cron
+
+# 1. load games session into object structure [{ game_id : str, session [ outcome : "win" | "loss", user_id : str, target :  ] }]
+# 2. load leaderboard into memory
+# 3. take time snapshot
+# 4. set users elo to 0 prepare for new elo
+# 5. use linear regression model to define new elo
+# 
+     
+
+# Leaderboard state
+# id
+# game_id one to one relationship
+# last_snapshot
+# players: object holds { username : str, beta : float64 }
+
+    

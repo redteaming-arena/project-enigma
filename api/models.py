@@ -141,6 +141,7 @@ class User(BaseModelWithUtils):
     provider: Optional[Literal['google']] = None
     pinned: List[Union[ObjectId, str]] = Field(default_factory=list)
     games_played : Optional[int] = 0
+    elo : Optional[int] = 0
 
     def update_last_login(self) -> None:
         """Update last login timestamp"""
@@ -192,6 +193,7 @@ class UserStats(BaseModelWithUtils):
     )
     games_played : int
     sessions : List[UserSessionStatsItem]
+    elo : Optional[int] = 0
 
 
 
@@ -266,8 +268,6 @@ class Game(BaseModelWithUtils):
     title: str
     author: List[str] = Field(default_factory=list)
     description: Optional[str] = None
-    gameplay: Optional[str] = None
-    objective: Optional[str] = None
     image: Optional[HttpUrl | str] = None  # Removed Union with str for clearer validation
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -678,4 +678,18 @@ class Request(BaseModelWithUtils):
     def add_message(self, role: str, content: str) -> None:
         """Add a new message to the request"""
         self.messages.append(ClientMessage(role=role, content=content))
+
+
+class LeaderboardUserDisplay(BaseModelWithUtils):
+    username : str 
+    elo : float
+class Leaderboard(BaseModelWithUtils):
+    id: Optional[str | ObjectId] = None
+    game_id : Optional[str | ObjectId] = None
+    last_snapshot : Optional[datetime] = None
+    players : List[LeaderboardUserDisplay] = []
+
+
+
+
 # # NOTE if you need more Models then continue here
