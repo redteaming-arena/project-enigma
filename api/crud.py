@@ -414,12 +414,12 @@ async def create_game_session(*,
 
         description = None
         if "session_description" in sample:
-            description = sample["session_description"]
-        elif game["metadata"].get("game_rules", {}).get("deterministic", False):
-            description = f"{game["session_description"]} {sample.get("kwargs", {}).get("target", "")}"
+            description = sample["session_description"]        
+        elif game.metadata.game_rules.get("deterministic", False):
+            description = f"{game.session_description} {sample.get("kwargs", {}).get("target", "")}"
         else:
-            description = f"{game["session_description"]}"
-
+            description = f"{game.session_description}"            
+            
         metadata = game.metadata.model_dump(exclude_none=True)
         if "kwargs" in sample:
             metadata["kwargs"] = sample["kwargs"]
