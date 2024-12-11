@@ -143,7 +143,6 @@ async def create_user(*, db: Database, user_create: UserRegister) -> User:
             user_data["last_login"]   = None
             user_data["last_signout"] = None
             user_data["access_token"] = None
-            user_data["pinned"] = []
         else:
             existing_user = await get_user_by_username(
                 db=db, username=user_create.username
@@ -164,6 +163,7 @@ async def create_user(*, db: Database, user_create: UserRegister) -> User:
             user_data["access_token"] = None
             user_data["image"] = generate(user_create.username)
             user_data["pinned"] = []
+            user_data["games_played"] = 0
 
         result = await db.users.insert_one(user_data)
 
@@ -993,29 +993,58 @@ async def get_leaderboards(db : Database):
 
 
 
-async def get_leaderboard_from_game_id(game_id : ObjectId, 
-                                       db : Database,
-                                       skip : int =0,
+async def get_leaderboard_from_game_id(game_id: ObjectId, 
+                                       db: Database,
+                                       skip: int = 0,
                                        limit: int = 0) -> dict:
-    """get leaderboard latest snapshot from mongodb"""
-    try :
-        leaderboard = await db.leaderboards.aggregate([
+    """Get leaderboard latest snapshot from MongoDB"""
+    try:
+        # Ensure skip and limit values are valid
+        skip = max(0, skip)
+        limit = max(0, limit)
+
+        pipeline = [
             { 
                 "$match": { 
                     "game_id": game_id 
                 }
             },
+            {
+                "$unwind": "$models"  # Deconstruct the models array
+            },
+            {
+                "$lookup": {
+                    "from": "models",  # Collection to join with
+                    "localField": "models.id",  # Field in models to match with the joined collection
+                    "foreignField": "_id",  # Field in the joined collection to match
+                    "as": "model_details"  # Name for the joined data
+                }
+            },
+            {
+                "$unwind": "$model_details"  # Flatten the model_details array
+            },
             # {
-            #     "$unwind" : "$models"
+            #     "$unwind": "$targets"  # Deconstruct the targets array
+            # },
+            # {
+            #     "$lookup": {
+            #         "from": "targets",  # Collection to join with
+            #         "localField": "targets.id",  # Field in targets to match with the joined collection
+            #         "foreignField": "_id",  # Field in the joined collection to match
+            #         "as": "target_details"  # Name for the joined data
+            #     }
+            # },
+            # {
+            #     "$unwind": "$target_details"  # Flatten the target_details array
             # },
             {
-                "$unwind": "$players"  # Deconstruct the players array to prepare for lookup
+                "$unwind": "$players"  # Deconstruct the players array
             },
             {
                 "$lookup": {
                     "from": "users",  # Collection to join with
-                    "localField": "players.id",  # Field in players to match with users
-                    "foreignField": "_id",  # Field in users to match against
+                    "localField": "players.id",  # Field in players to match with the joined collection
+                    "foreignField": "_id",  # Field in the joined collection to match
                     "as": "user_details"  # Name for the joined data
                 }
             },
@@ -1028,23 +1057,32 @@ async def get_leaderboard_from_game_id(game_id : ObjectId,
                     "id": { "$toString": "$_id" },  # Convert leaderboard _id to string
                     "game_id": { "$toString": "$game_id" },  # Convert game_id to string
                     "last_snapshot": 1,
-                    "mean" : 1,
+                    "mean": 1,
                     "player": {
                         "id": { "$toString": "$players.id" },  # Convert ObjectId to string
                         "elo": "$players.elo",
                         "username": "$user_details.username",
-                    }
+                    },
+                    "model": {
+                        "_id" : 0,
+                        "id": { "$toString": "$models.id" },
+                        "name": "$model_details.name",
+                    },
+                    "targets": 1
                 }
             },
             {
                 "$group": {
                     "_id": {
-                        "id": { "$toString" : "$id" },
-                        "game_id": { "$toString" : "$game_id"},
+                        "id": { "$toString": "$_id" },
+                        "game_id": { "$toString": "$game_id" },
                         "last_snapshot": "$last_snapshot",
-                        "mean" : "$mean",
+                        "mean": "$mean",
+                        "target" : "$targets"
                     },
-                    "players": { "$push": "$player" } 
+                    "players": { "$push": "$player" },
+                    "models": { "$push": "$model" },
+                    # "targets": { "$push": "$target" }
                 }
             },
             {
@@ -1054,28 +1092,32 @@ async def get_leaderboard_from_game_id(game_id : ObjectId,
                     "game_id": "$_id.game_id",
                     "mean": "$_id.mean",
                     "last_snapshot": "$_id.last_snapshot",
-                    "players": { "$slice" : [ "$players", max(0, skip), max(skip + 1, limit) ] } ,
+                    "players": { "$slice": [ "$players", skip, limit ] },
+                    "target" : { "$slice": [ "$_id.target", skip, limit ] }
+                    # "models": { "$slice": [ "$models", skip, limit ] },
+                    # "targets": { "$slice": [ "$targets", skip, limit ] }
                 }
             }
-        ]).next()
-        if leaderboard is None or len(leaderboard) == 0:
-            return HTTPException(
+        ]
+
+        leaderboard = await db.leaderboards.aggregate(pipeline).to_list(length=1)
+
+        if not leaderboard:
+            raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No leaderboard found under {str(game_id)}"    
+                detail=f"No leaderboard found under {str(game_id)}"
             )
 
+        return leaderboard[0]  # Return the first (and only) result
 
-
-        return leaderboard
-    except HTTPException as h:
-        raise h
-    except Exception as e:
-        logger.error(e)
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as exc:
+        logger.error(f"Error retrieving leaderboard: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something on server end could not complete this call"
+            detail="Something on the server end could not complete this call"
         )
-    
 
 
 # cron
