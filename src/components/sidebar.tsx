@@ -277,11 +277,11 @@ const SidebarDropDownMenu = () => {
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56">
         <DropdownMenuGroup>
-          <Link href="/account" prefetch>
+          {/* <Link href="/account" prefetch>
             <DropdownMenuItem tabIndex={0}>
               <span>Account</span>
             </DropdownMenuItem>
-          </Link>
+          </Link> */}
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <span>Learn More</span>
@@ -292,6 +292,12 @@ const SidebarDropDownMenu = () => {
                   <Link href={"https://lmsys.org/"} prefetch>
                     <SquareArrowOutUpRight />
                     <span>About LMSYS</span>
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={"https://lmsys.org/"} prefetch>
+                    <SquareArrowOutUpRight />
+                    <span>Elo Update</span>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
