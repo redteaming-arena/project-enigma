@@ -23,14 +23,14 @@ class OpenAICompletionResponse(CompletionResponse["ChatCompletion", str], Functi
     def metadata(self) -> CompletionMetadata:
         return self._metadata
     
-    def iter_tokens(self) -> Iterable[str]:
+    def iter_chunks(self) -> Iterable[str]:
         if hasattr(self._response, "choices") and self._response.choices:
             if hasattr(self._response.choices[0], "message") and self._response.choices[0].message:
                 if hasattr(self._response.choices[0].message, "content"):
                     yield self._response.choices[0].message.content
     
     def get_text(self) -> str:
-        return "".join(self.iter_tokens())
+        return "".join(self.iter_chunks())
     
     def get_function_call(self) -> Optional[List[Dict[str, str]]]:
         if (hasattr(self._response.choices[0].message, "tool_calls") and 
@@ -58,7 +58,7 @@ class OpenAICompletionStream(CompletionResponse["Stream[ChatCompletionChunk]", s
     def metadata(self) -> CompletionMetadata:
         return self._metadata
     
-    def iter_tokens(self) -> Iterable[str]:
+    def iter_chunks(self) -> Iterable[str]:
         for old_chunk in self._chunk_response:
             yield old_chunk
         at_index = len(self._chunk_response)
@@ -85,7 +85,7 @@ class OpenAICompletionStream(CompletionResponse["Stream[ChatCompletionChunk]", s
 
     
     def get_text(self) -> str:
-        return "".join(self.iter_tokens())
+        return "".join(self.iter_chunks())
     
     def get_function_call(self) -> Optional[List[Dict[str, str]]]:
         if self._functions:
@@ -118,7 +118,6 @@ class OpenAICompletionStrategy(CompletionStrategy):
         
         metadata = CompletionMetadata(
             model=kwargs.pop("model", None),
-            created=response.created if not stream else None,
             provider="openai",
             stream=stream,
             capabilities=list(self._capabilities)

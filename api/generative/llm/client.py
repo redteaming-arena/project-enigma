@@ -1,5 +1,4 @@
 import os
-from api.utils import logger
 from typing import Any, Dict, List
 from .types import CompletionResponse
 from .factory import CompletionFactory
@@ -32,9 +31,16 @@ CompletionFactory.register_strategy("anthropic", AnthropicCompletionStrategy)
     },
     {
         # registry location
-        "name" : "claude-3-5-sonnet-20241022",
+        "name" : "claude",
         "provider" : "anthropic",
         "api_key"  : os.getenv("ANTHROPIC_API_KEY", None),
+    },
+    {
+        # registry location
+        "name" : "gemini",
+        "provider" : "google",
+        "base_url" : "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key"  : os.getenv("GEMINI_API_KEY", None)
     }]
 )
 class Client:
@@ -45,7 +51,7 @@ class Client:
         base_url: str = "https://api.openai.com/v1",
         **kwargs
     ):
-        if OPENAI_MODULE_AVAILABLE and provider == "openai":
+        if OPENAI_MODULE_AVAILABLE and provider in ("openai", "google"):
             self._client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
@@ -68,7 +74,6 @@ class Client:
             **kwargs
         ) -> CompletionResponse:
             """Generate a completion using the appropriate strategy"""
-            logger.info(f"LLM create_completion: messages {messages}")
             return self._strategy.create_completion(
                 messages=messages,
                 stream=stream,

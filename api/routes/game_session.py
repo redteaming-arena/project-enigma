@@ -324,7 +324,7 @@ def model_generate_generator(
             stream = client.generate(history, model)
         
 
-        for token in stream.iter_tokens():
+        for token in stream.iter_chunks():
             calmative_token += token
             
             if not tool_enabled and not session.outcome and validator(**{"source" : calmative_token} | metadata.kwargs):

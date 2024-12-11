@@ -26,7 +26,6 @@ class CompletionMetadata:
     """Metadata about a completion response"""
     model : Optional[str]
     provider: str
-    created : Optional[int]
     stream: bool
     usage: Optional[Dict[str, int]] = None
     capabilities: List[CompletionCapability] = field(default_factory=list)
@@ -44,7 +43,7 @@ class CompletionResponse(Protocol[T_Completion, T_Token]):
         """Get metadata about the completion"""
         ...
     
-    def iter_tokens(self) -> Iterable[T_Token]:
+    def iter_chunks(self) -> Iterable[T_Token]:
         """Iterate over tokens in the completion"""
         ...
     
