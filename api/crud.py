@@ -437,7 +437,7 @@ async def create_game_session(*,
             completed_time=None,
             outcome=None,
             shared=None,
-            metadata=metadata).model_dump()
+            metadata=metadata)
 
         
         result = await db.sessions.insert_one(new_session\
