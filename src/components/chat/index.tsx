@@ -163,7 +163,7 @@ export const SharedConversation = ({
           }}
         >
           <DialogContent
-            className="sm:max-w-[425px]"
+            className="sm:max-w-[1024px]"
             // Prevent closing by clicking outside
             onPointerDownOutside={(e) => e.preventDefault()}
             // Prevent closing by pressing escape
@@ -171,7 +171,7 @@ export const SharedConversation = ({
           >
             <DialogHeader className="text-center">
               <DialogTitle>Game Objective</DialogTitle>
-              <DialogDescription>
+              <DialogDescription style={{ whiteSpace: "pre-line" }}>
                 <br className="mb-4" />
                 <span className=" font-bold text-white mt-3">
                   Objective
