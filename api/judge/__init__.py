@@ -13,7 +13,7 @@ def target(*,
            source: str,
            target: str,
            regex: Union[str, re.Pattern, None] = None,
-           ignore_case: bool = False):
+           ignore_case: bool = True):
     if regex is not None:
         if isinstance(regex, str):
             flags = re.IGNORECASE if ignore_case else 0
@@ -22,7 +22,7 @@ def target(*,
         result = regex.sub(target, source)
         return result
     else:
-        return target.lower() in source.lower()  if ignore_case else target in source
+        return target.lower() in source.lower() if ignore_case else target in source
 
 @FunctionDecorator(function_type='sampler')
 def get_bad_word() -> Dict[str, Any]:
