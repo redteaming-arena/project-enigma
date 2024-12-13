@@ -199,8 +199,11 @@ function UserProvider({ children }: { children: React.ReactNode }) {
       notification.showError(
         `Something went wrong, ${state.username} was not signed out`
       );
+      setIsLoading(false);
+      return;
     }
     setIsLoading(false);
+    router.push("/login")
   };
 
   const handleSessionPop = async (_id: string) => {
