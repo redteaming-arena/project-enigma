@@ -1,7 +1,6 @@
 "use client";
-
 import { createUsername, getUser } from "@/service/user";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Card,
@@ -25,8 +24,10 @@ export default function UsernamePage() {
   const notification = useNotification();
 
   useEffect(() => {
+
     setIsWaitingForUsername(true)
-  }, []);
+    
+  }, [setIsWaitingForUsername]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

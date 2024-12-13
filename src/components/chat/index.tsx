@@ -6,6 +6,7 @@ import {
   createTitle,
   concludeSessionGame,
   GameSessionPublicResponse,
+  startGame
 } from "@/service/session";
 import { Message as MessageComponent } from "./message";
 import { ScrollArea } from "../ui/scroll-area";
@@ -207,9 +208,14 @@ export const ChatComponent = ({
     handleSessionPush,
   } = useUser();
   // State
-  const [showTargetModal, setShowTargetModal] = useState(!session.completed);
+  console.log(!session.completed && session.start_time !== null,  session.start_time !== null, !session.completed, session.start_time)
+
+  // session is not completed, or if the time has not started
+  console.log(session.completed ? false : session.start_time === null)
+  const [showTargetModal, setShowTargetModal] = useState(session.completed ? false : session.start_time === null);
+  const [loadingTargetModal, setLoadingTargetModal] = useState<boolean>(false);
   const [hasText, setHasText] = useState(false);
-  const [outcome, setOutcome] = useState<null | "win" | "loss" | "forfeit">(
+  const [outcome, setOutcome] = useState<null | "win" | "loss">(
     null
   );
 
@@ -220,7 +226,7 @@ export const ChatComponent = ({
   // Hook
   const { isMobile } = useSidebar();
   const notification = useNotification();
-  const { seconds, isComplete, start, pause, formatTime } = useTimer(10 * 60);
+  const { seconds, isComplete, start, pause, formatTime } = useTimer(session.metadata?.game_rules.time_limit ?? 10);
 
   const {
     messages,
@@ -300,7 +306,7 @@ export const ChatComponent = ({
                   if (chunk.outcome === "win") {
                     pause();
                     const message =
-                      messages.length === 0 ? [ { content : "<empty>" }, { content }] : messages;
+                      messages.length === 0 ? [ { content : chunk.content ?? "<empty>" }, { content }] : messages;
                     await handleSessionEnd(message, "win");
                   }
                   break;
@@ -436,7 +442,10 @@ export const ChatComponent = ({
     // Check if session.description is available and not empty
     if (!session.completed && session.description) {
       // Show the target modal
-      setShowTargetModal(true);
+      setShowTargetModal(session.start_time === null);
+      if (session.start_time !== null){
+        start()
+      }
     }
   }, [session.description, setShowTargetModal]);
 
@@ -856,18 +865,31 @@ export const ChatComponent = ({
           </DialogHeader>
           <DialogFooter>
             <Button
+              disabled={loadingTargetModal}
               variant="secondary"
-              onClick={() => {
-                if (!session.completed) {
-                  start(); // the timer
-                }
+              onClick={async () => {
                 if (textareaRef.current) {
                   textareaRef.current.focus();
                 }
-
+                if (session.id && user.id){
+                  setLoadingTargetModal(true)
+                  const response = await startGame(session.id, user.id)
+                  if (!response.ok){
+                    notification.showError("Could not start sessions")
+                    router.push("/")
+                  }
+                  // if session is not completed we don't need to start
+                  if (!session.completed) {
+                    start(); // the timer
+                  }
+                } else {
+                  router.push("/")
+                }
+                setLoadingTargetModal(false)
                 setShowTargetModal(false);
               }}
             >
+              {loadingTargetModal && <Loading/>}
               {session.completed ? "Close" : "Start Cracking"}
             </Button>
           </DialogFooter>

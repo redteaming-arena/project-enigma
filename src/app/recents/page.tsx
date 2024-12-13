@@ -15,7 +15,7 @@ import { ScrollArea } from "@radix-ui/react-scroll-area";
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 export default function Recent() {
   const router = useRouter();
@@ -26,7 +26,7 @@ export default function Recent() {
   const [history, setHistory] = useState<GameSessionRecentItem[]>([]);
   const [query, setQuery] = useState<string>("");
 
-  const handleHistory = async () => {
+  const handleHistory = useCallback(async () => {
     const recent: GameSessionRecentItemResponse = await getRecents(
       0,
       undefined
@@ -38,11 +38,11 @@ export default function Recent() {
     } else {
       router.push("/");
     }
-  };
+  }, [setHistory, setLoading, router]);
 
   useEffect(() => {
-    handleHistory();
-  }, []);
+    handleHistory()
+  }, [])
 
   if (loading || isLoading) {
     return (

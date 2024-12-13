@@ -44,6 +44,7 @@ export interface GameSessionPublic {
   description?: string | null;
   create_time?: Date | null;
   completed_time?: Date | null;
+  start_time?: Date | null;
   outcome?: "win" | "loss" | "forfeit" | null;
   metadata?: GameSessionMetadata | null;
   completed?: boolean;
@@ -131,6 +132,48 @@ export async function getSession(
   } catch (error) {
     console.error("Error in getting session:", error);
     return error as HandleErrorResponse;
+  }
+}
+
+export async function startGame(
+  session_id: string,
+  user_id: string
+): Promise<MessageTypeResponse> {
+  const cookieStore = await cookies();
+  const authToken = cookieStore.get("sessionKey")?.value;
+
+  if (!authToken) {
+    return { ok: false, error: "Session token does not exist" };
+  }
+
+  try {
+    const response = await fetch(
+      `${process.env.FRONTEND_HOST}/api/${session_id}/chat_conversation/${user_id}/start`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error:
+          response.status === 401
+            ? "Unauthorized: Invalid token"
+            : `Error: ${response.statusText} (${response.status})`,
+      };
+    }
+    const data = await response.json();
+    return {
+      ...data,
+      ok: true,
+    };
+  } catch (err) {
+    return { ok: false, error: "An unexpected error occurred" };
   }
 }
 

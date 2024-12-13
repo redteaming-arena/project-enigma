@@ -4,7 +4,11 @@ import type { Game } from "@/types/game";
 import { GameHeader } from "@/components/game/header";
 import { GameDetails } from "@/components/game/details";
 import { GameSettings } from "@/components/game/setting";
-import { GameDetailsSkeleton, GameHeaderSkeleton, GameSettingsSkeleton } from "@/components/skeleton/game";
+import {
+  GameDetailsSkeleton,
+  GameHeaderSkeleton,
+  GameSettingsSkeleton,
+} from "@/components/skeleton/game";
 import { Metadata } from "next";
 
 interface GamePageProps {
@@ -13,7 +17,9 @@ interface GamePageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: GamePageProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: GamePageProps): Promise<Metadata> {
   const { id } = await params;
 
   try {
@@ -28,7 +34,9 @@ export async function generateMetadata({ params }: GamePageProps): Promise<Metad
     const game = response as Game;
 
     return {
-      metadataBase: new URL("https://project-enigma-620119407459.us-central1.run.app/"),
+      metadataBase: new URL(
+        "https://project-enigma-620119407459.us-central1.run.app/"
+      ),
       title: `${game.title} - RedArena`,
       description: game.description,
       keywords: [
