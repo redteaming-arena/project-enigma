@@ -14,6 +14,7 @@ export async function middleware(request: NextRequest) {
   const isAuthenticated = tokenValidation.ok;
   const hasUsername = tokenValidation.username !== null;
 
+
   // If authenticated but no username, force stay on username page
   if (isAuthenticated && !hasUsername) {
     // Allow access to the username page itself
@@ -51,6 +52,10 @@ export async function middleware(request: NextRequest) {
     if (!hasUsername) {
       return NextResponse.redirect(new URL("/username", request.url));
     }
+  }
+
+  if (!isAuthenticated && !pathname.startsWith("/login")){
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   // Allow the request to continue
