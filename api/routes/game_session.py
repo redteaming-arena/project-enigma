@@ -9,7 +9,7 @@ from fastapi import APIRouter, \
 from fastapi.responses import StreamingResponse
 from pymongo.results import UpdateResult
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from zoneinfo import ZoneInfo
 
 from api import crud
@@ -45,7 +45,8 @@ async def create_session(
         GameSessionCreateResponse: Response model with session_id and target
     """
     try:
-        game = await crud.get_game_from_id(db=db, id=game_id)
+        game = await crud.get_game_from_id(db=db, 
+                                           id=game_id)
 
         if not game:
             raise HTTPException(
@@ -86,6 +87,7 @@ async def get_chat_session(
 ) -> GameSessionPublic:
     
     try:
+
         session = await crud.get_session(
             user_id=ObjectId(user.id),
             session_id=id,
@@ -96,39 +98,95 @@ async def get_chat_session(
 
         if timed and not session.completed:
             timed_limit = session.metadata.game_rules.get("timed_limit", 5400) // 60
-            wiggle_room = 30  # 30 seconds buffer
-            total_time_limit = timed_limit + wiggle_room
 
             # Calculate elapsed time
-            start = session.create_time
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=UTC)
+            if session.start_time:
+                # Sessions was stated but never completed
+                start = session.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=UTC)
+                
+            else:
+                # session is never started
+                # then were comparing the game was created
+                # if it exceeds triple the time then the session
+                # will be deleted
+                start = session.create_time       
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=UTC)
+                
             end = datetime.now(ZoneInfo("UTC"))  # Get the current time in UTC
             elapsed_time = (end - start).total_seconds()
-            if elapsed_time > total_time_limit:
+            
+            if elapsed_time > timed_limit:
                 # Time is over, mark session as completed or lost
                 session.outcome = "loss"
                 session.completed_time = end
                 session.completed = True
-
+                
+                # don't show this to the user it's not needed
+                if session.start_time is None:
+                    session.visible = False
+                
                 # Update the session in the database
                 await crud.update_game_session(session_id=id, 
                                                db=db, 
                                                updated_session=session,
                                                updates=["outcome", 
                                                         "completed_time",
-                                                        "completed"])
+                                                        "completed",
+                                                        "visible"])
+                
+            else:
+                # set the game to the elapse timeleft so the game does not give
+                # a false sense of time
+                session.metadata.game_rules["time_limit"] = (timed_limit - elapsed_time) * 60
+                
 
 
 
     except HTTPException as h:
         raise h
-    except Exception as e:
-        print(e)
+    except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                             detail="Server Error: Something happened when trying to retrieve session")
 
     return session
+
+
+@router.post("/{id}/chat_conversation/{user_id}/start")
+async def start_game(id : str,
+                     user_id : str,
+                     user : CurrentUser,
+                     db : Database):
+
+    start = datetime.now(UTC)
+    session = await crud.get_session(
+            user_id=ObjectId(user.id),
+            session_id=id,
+            db=db)
+    if not session.start_time:
+        session.start_time = start
+        
+        if str(session.user_id) != str(user.id) != str(user_id):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="You do not have permission to access this session"
+                )
+        
+        await crud.update_game_session(
+            db=db,
+            session_id=id,
+            updated_session=session,
+            updates=["start_time"]
+        )
+    else:
+        return Message(
+            status=status.HTTP_200_OK,
+            message="sessions has already been started"
+        )
+    
+
 
 @router.delete("/{user_id}/chat_conversation", tags=["Game Session"])
 async def deleted_sessions(
@@ -240,7 +298,7 @@ async def title_completion(
                 }
             ]
 
-            client = Models.get_client(session.model.name)
+            client = Models.get_client(session.model.namespace)
             
             # Generate title with max_tokens limit
             title_response = client.generate(
@@ -276,10 +334,8 @@ async def title_completion(
         )
         
     except HTTPException as h:
-        print(h)
         raise h
-    except Exception as e:
-        print(e)
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server Error: something happen while title completion"
@@ -293,8 +349,15 @@ def model_generate_generator(
         db : Database,
         session : Dict[str, Any],
         background : BackgroundTasks):
+    
+    # calmative tokens accumulated from stream 
+    calmative_token = ""
+    updates = {"history"}
 
     try:
+
+        # session id should equal user token id, and user_id and or session is completed
+        # then raise a forbidden status
         if str(session.user_id) != str(current_user.id) != user_id or session.completed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -303,14 +366,12 @@ def model_generate_generator(
 
         # NOTE: where assuming the user does not have access 
         session.history = history
+        model_client_name = session.model.namespace
         model = session.model.name
         metadata = session.metadata
         validator = registry.get_validator(session.judge.validator.function.name)
 
-        client = Models.get_client(model)
-
-        updates = {"history"}
-        calmative_token = ""
+        client = Models.get_client(model_client_name)
         
         tools_config = metadata.models_config.get("tools_config", {})
         system_prompt = metadata.models_config.get("system_prompt", "")
@@ -351,7 +412,10 @@ def model_generate_generator(
             session.completed_time = datetime.now(UTC)
             updates = updates | {"completed", "outcome", "completed_time"}
 
-
+        if session.outcome == "win":
+            yield "{payload}\n".format(
+                payload=json.dumps(dict(event="end", outcome="win", content=calmative_token))
+            )
     finally:
         session.history.append({"role": "assistant", "content": calmative_token }) 
         background.add_task(crud.update_game_session,

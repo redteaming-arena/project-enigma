@@ -412,9 +412,12 @@ async def create_game_session(*,
         # after it's been allocated to the game session 
         sample = registry.get_sampler(sample_fn.name)()
 
+        # check if game is deterministic if so then
+        # there is a target target within the sample
         description=None
-        if game.metadata.game_rules.get("deterministic", False):
-            description = f"{game.session_description} {sample.get("kwargs", {}).get("target", "")}"
+        if game.metadata.game_rules.get("deterministic", False) \
+           and (target := sample.get("kwargs", {}).get("target", None)) is not None:
+            description = f"{game.session_description}: {target}"
         else:
             description = f"{game.session_description}"
 
@@ -525,6 +528,7 @@ async def get_session_from_shared_id(*, shared_id: str, db: Database):
                 "outcome": 1,
                 "completed_time": 1,
                 "create_time": 1,
+                "start_time" : 1,
                 "description" : 1,
                 "user": {
                     "username" : 1,
@@ -626,6 +630,7 @@ async def get_session(*,
             "completed_time": 1,
             "create_time": 1,
             "description" : 1,
+            "start_time" : 1,
             "user": {
             "username": 1
             },
@@ -634,6 +639,7 @@ async def get_session(*,
             },
             "model": {
             "name": 1,
+            "namespace" : 1,
             "provider": 1,
             "image": 1,
             "metadata": 1
@@ -941,6 +947,7 @@ async def fetch_and_process_leaderboard_data(
         ]
         sessions = await db.sessions.aggregate(pipeline=pipeline)\
                                     .to_list(length=None)
+        
 
         game_ids = [ s["game_id"] for s in sessions ]
 
@@ -949,16 +956,18 @@ async def fetch_and_process_leaderboard_data(
             "game_id" : { "$in" : game_ids } 
         }).to_list(None)
 
+
         leaderboard = { l["game_id"] : l for l in leaderboards }
 
         if not leaderboards and len(leaderboards) == 0:
             yield None
+            return 
         
 
         # NOTE: rename me to a better function name
         def unique_objects(game : dict):
-            unique_users =   {user['user_id'] for user in game['sessions']}
-            unique_models =  {user['model']   for user in game['sessions']}
+            unique_users   = {user['user_id'] for user in game['sessions']}
+            unique_models  = {user['model']   for user in game['sessions']}
             unique_targets = {user['target']  for user in game['sessions']}
             return unique_users, unique_models, unique_targets
         
@@ -992,7 +1001,156 @@ async def get_leaderboards(db : Database):
         )
 
 
+async def get_leaderboard_buffer(db : Database,
+                          game_id : ObjectId,
+                          query : str,
+                          skip: int = 0,
+                          limit: int = 0):
+    
+    skip = max(0, skip)
+    limit = max(0, limit)
 
+   # Base pipeline
+    pipeline = [
+        {
+            "$match": {
+                "game_id": game_id
+            }
+        }
+    ]
+
+    if query == "users":
+        pipeline += [
+            {
+                "$unwind": "$players"
+            },
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "players.id",
+                    "foreignField": "_id",
+                    "as": "user_details"
+                }
+            },
+            {
+                "$unwind": "$user_details"
+            },
+            {
+                "$project": {
+                    "id": { "$toString": "$players.id" },
+                    "elo": "$players.elo",
+                    "delta": "$players.delta",
+                    "username": "$user_details.username"
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id",
+                    "players": { "$push": "$$ROOT" }
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "players": { "$slice": ["$players", skip, limit] }
+                }
+            }
+        ]
+    elif query == "models":
+        pipeline += [
+            {
+                "$unwind": "$models"
+            },
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "models.id",
+                    "foreignField": "_id",
+                    "as": "model_details"
+                }
+            },
+            {
+                "$unwind": "$model_details"
+            },
+            {
+                "$project": {
+                    "id": { "$toString": "$models.id" },
+                    "elo": "$models.elo",
+                    "delta": "$models.delta",
+                    "name": "$model_details.name",
+                    "image": "$model_details.image"
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id",
+                    "models": { "$push": "$$ROOT" }
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "models": { "$slice": ["$models", skip, limit] }
+                }
+            }
+        ]
+    elif query == "targets":
+        pipeline += [
+            {
+                "$unwind": "$targets"
+            },
+            {
+                "$project": {
+                    "id": { "$toString": "$targets.id" },
+                    "elo": "$targets.elo",
+                    "delta": "$targets.delta"
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id",
+                    "targets": { "$push": "$$ROOT" }
+                }
+            },
+            {
+                "$sort" : { "targets.elo" : -1 }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "targets": { "$slice": ["$targets", skip, limit] }
+                }
+            }
+        ]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{query} is not a valid query."
+        )
+
+    try:
+        leaderboard = await db.leaderboards.aggregate(pipeline).to_list(length=1)
+
+        if not leaderboard:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No leaderboard found under {str(game_id)}"
+            )
+
+        return leaderboard[0]  # Return the first (and only) result
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as exc:
+        logger.error(f"Error retrieving leaderboard buffer: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something on the server end could not complete this call"
+        )
+
+
+# NOTE DEPRECATED this function will soon be deprecated 
+#      due to it's use when 
 async def get_leaderboard_from_game_id(game_id: ObjectId, 
                                        db: Database,
                                        skip: int = 0,
@@ -1009,6 +1167,7 @@ async def get_leaderboard_from_game_id(game_id: ObjectId,
                     "game_id": game_id 
                 }
             },
+            # Process models
             {
                 "$unwind": "$models"  # Deconstruct the models array
             },
@@ -1023,82 +1182,67 @@ async def get_leaderboard_from_game_id(game_id: ObjectId,
             {
                 "$unwind": "$model_details"  # Flatten the model_details array
             },
-            # {
-            #     "$unwind": "$targets"  # Deconstruct the targets array
-            # },
-            # {
-            #     "$lookup": {
-            #         "from": "targets",  # Collection to join with
-            #         "localField": "targets.id",  # Field in targets to match with the joined collection
-            #         "foreignField": "_id",  # Field in the joined collection to match
-            #         "as": "target_details"  # Name for the joined data
-            #     }
-            # },
-            # {
-            #     "$unwind": "$target_details"  # Flatten the target_details array
-            # },
-            {
-                "$unwind": "$players"  # Deconstruct the players array
-            },
-            {
-                "$lookup": {
-                    "from": "users",  # Collection to join with
-                    "localField": "players.id",  # Field in players to match with the joined collection
-                    "foreignField": "_id",  # Field in the joined collection to match
-                    "as": "user_details"  # Name for the joined data
-                }
-            },
-            {
-                "$unwind": "$user_details"  # Flatten the user_details array
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "id": { "$toString": "$_id" },  # Convert leaderboard _id to string
-                    "game_id": { "$toString": "$game_id" },  # Convert game_id to string
-                    "last_snapshot": 1,
-                    "mean": 1,
-                    "player": {
-                        "id": { "$toString": "$players.id" },  # Convert ObjectId to string
-                        "elo": "$players.elo",
-                        "username": "$user_details.username",
-                    },
-                    "model": {
-                        "_id" : 0,
-                        "id": { "$toString": "$models.id" },
-                        "name": "$model_details.name",
-                    },
-                    "targets": 1
-                }
-            },
             {
                 "$group": {
-                    "_id": {
-                        "id": { "$toString": "$_id" },
-                        "game_id": { "$toString": "$game_id" },
-                        "last_snapshot": "$last_snapshot",
-                        "mean": "$mean",
-                        "target" : "$targets"
-                    },
-                    "players": { "$push": "$player" },
-                    "models": { "$push": "$model" },
-                    # "targets": { "$push": "$target" }
+                    "_id": "$_id",
+                    "game_id": { "$first": "$game_id" },
+                    "last_snapshot": { "$first": "$last_snapshot" },
+                    "mean": { "$first": "$mean" },
+                    "targets" : { "$first": "$targets" },
+                    "models": {
+                        "$addToSet": {
+                            "id": { "$toString": "$models.id" },
+                            "elo" : "$models.elo",
+                            "delta" : "$models.delta",
+                            "name": "$model_details.name",
+                            "image": "$model_details.image"
+                        }
+                    }
+                }
+            },
+            # Process players
+            {
+                "$lookup": {
+                    "from": "leaderboards",
+                    "let": { "game_id": "$game_id" },
+                    "pipeline": [
+                        { "$match": { "$expr": { "$eq": ["$game_id", "$$game_id"] } } },
+                        { "$unwind": "$players" },
+                        {
+                            "$lookup": {
+                                "from": "users",
+                                "localField": "players.id",
+                                "foreignField": "_id",
+                                "as": "user_details"
+                            }
+                        },
+                        { "$unwind": "$user_details" },
+                        {
+                            "$project": {
+                                "id": { "$toString": "$players.id" },
+                                "elo": "$players.elo",
+                                "delta": "$players.delta",
+                                "username": "$user_details.username"
+                            }
+                        }
+                    ],
+                    "as": "players"
                 }
             },
             {
                 "$project": {
                     "_id": 0,
-                    "id": "$_id.id",
-                    "game_id": "$_id.game_id",
-                    "mean": "$_id.mean",
-                    "last_snapshot": "$_id.last_snapshot",
-                    "players": { "$slice": [ "$players", skip, limit ] },
-                    "target" : { "$slice": [ "$_id.target", skip, limit ] }
-                    # "models": { "$slice": [ "$models", skip, limit ] },
-                    # "targets": { "$slice": [ "$targets", skip, limit ] }
+                    "id": { "$toString": "$_id" },
+                    "game_id": { "$toString": "$game_id" },
+                    "last_snapshot": 1,
+                    "mean": 1,
+                    "players": { "$slice": ["$players", skip, limit] },
+                    "models" : { "$slice": ["$models",  skip, limit] },
+                    "targets": { "$slice": ["$targets", skip, limit] },
                 }
             }
         ]
+
 
         leaderboard = await db.leaderboards.aggregate(pipeline).to_list(length=1)
 

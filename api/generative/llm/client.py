@@ -23,7 +23,7 @@ CompletionFactory.register_strategy("anthropic", AnthropicCompletionStrategy)
 @ModelRegistry.register(
     configs=[{
         # registry location
-        "name" : "gpt-4o",
+        "name" : "gpt",
         "provider" : "openai",
         # init constants
         "base_url" : "https://api.openai.com/v1",

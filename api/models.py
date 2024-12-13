@@ -285,7 +285,6 @@ class Game(BaseModelWithUtils):
             self.stars.remove(user_id)
 
 class ModelMetadata(BaseModelWithUtils):
-    endpoint: Optional[str] = None
     tools: List[Dict] = Field(default_factory=list)
     config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -315,6 +314,7 @@ class Model(BaseModelWithUtils):
 
     id: Union[ObjectId, str] = None
     image: Union[str, HttpUrl]
+    namespace : str = Field(...)
     name: str = Field(...)
     provider: str = Field(...)
     created_at: datetime
@@ -330,6 +330,7 @@ class Model(BaseModelWithUtils):
 class ModelPublic(BaseModelWithUtils):
 
     name: Optional[str] = None
+    namespace : Optional[str] = None
     provider: Optional[str] = None
     image: Optional[Union[str, HttpUrl]] = None
     metadata: Optional[ModelMetadata] = None
@@ -338,6 +339,7 @@ class ModelPublic(BaseModelWithUtils):
     def from_model(cls, model: Model) -> "ModelPublic":
         return cls(
             name=model.name,
+            namespace=model.namespace,
             provider=model.provider,
             image=model.image,
             metadata=model.metadata
@@ -470,6 +472,7 @@ class GameSessionPublic(BaseModelWithUtils):
     title: Optional[str] = None
     create_time: Optional[datetime] = None
     completed_time: Optional[datetime] = None
+    start_time: Optional[datetime] = None
     outcome: Optional[str] = None
     description : Optional[str] = None
     

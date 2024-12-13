@@ -28,7 +28,6 @@ async def compute_leaderboard():
     # collections.
     db : Database = await get_database()
 
-    
     # NOTE: I don't like this solution 
     leaderboard = await db.leaderboards.find_one({})
 
@@ -36,12 +35,10 @@ async def compute_leaderboard():
         logger.error("Session not recorded due to not finding leaderboard")
         return
     
-    last_snapshot : datetime = leaderboard.get("last_snapshot", 
-                                       snapshot - timedelta(minutes=DEFAULT_CRON_JOB_CALL))
+    default_delta = snapshot - timedelta(minutes=DEFAULT_CRON_JOB_CALL)
+    last_snapshot = leaderboard.get("last_snapshot", default_delta)
     
     last_snapshot = last_snapshot.replace(tzinfo=timezone.utc)
-    # last_snapshot = datetime(year=2024, month=12, day=1)
-    # snapshot = datetime(year=2024, month=12, day=10)
 
     sessions = crud.fetch_and_process_leaderboard_data(db=db, 
                                                        last_snapshot=last_snapshot,
@@ -50,18 +47,13 @@ async def compute_leaderboard():
     logger.info(f"obtain future for processing: {sessions}")
     update_leaderboards = await process_sessions(sessions)
 
-    if len(update_leaderboards) == 0:
-        logger.info("no updates in this step.")
-        return
-
-
-    # update leaderboards
+    # update leaderboards 
     for l in update_leaderboards:
         update = {
             "$set" : {
                 "players" : l["players"],
                 "models"  : l["models"],
-                "targets"  : l["targets"] ,
+                "targets" : l["targets"],
                 "mean"    : l["mean"],
                 "last_snapshot" : snapshot
             },
@@ -71,25 +63,35 @@ async def compute_leaderboard():
 
     logger.info(f"Updated {len(update_leaderboards)} leaderboards.")
 
-    time_range = {
-            "$gte": last_snapshot,
-            "$lt":  snapshot,
-    }
-    delete_query = {
-        "$and": [
-            {"game_id": {"$in": [l["_id"] for l in update_leaderboards]},
-             "completed": True, 
-             "completed_time": time_range },
-            {"$or": [
-                {"visible": False},
-                {"$expr": {"$lt": [{"$size": "$history"}, 2]}}
-            ]}
-        ]
-    }
+        
+    # if len(update_leaderboards) != 0:
+        # NOTE: possible best not to delete for now just keep
+        #       invisible for user not to see them to count 
+        #       personal stat(s).
+        # time_range = {
+        #         "$gte": last_snapshot,
+        #         "$lt":  snapshot,
+        # }
+        # delete_query = {
+        #     "$and": [
+        #         {"game_id": {"$in": [l["_id"] for l in update_leaderboards]},
+        #         "completed": True, 
+        #         "completed_time": time_range },
+        #         {"$or": [
+        #             {"visible": False},
+        #             {"$expr": {"$lt": [{"$size": "$history"}, 2]}}
+        #         ]}
+        #     ]
+        # }
 
-    # delete all the session user have discarded or are garbage
-    result = await db.sessions.delete_many(delete_query)
-    logger.info(f"Deleted {result.deleted_count} sessions from this snapshot.")
+        # # delete all the session user have discarded or are garbage
+        # result = await db.sessions.delete_many(delete_query)
+        # logger.info(f"Deleted {result.deleted_count} sessions from this snapshot.")
+    
+    # always update leaderboard even if there are no sessions 
+    snapshots = await db.leaderboards.update_many({}, { "$set" : { "last_snapshot" : snapshot } })
+    
+    logger.info(f"Updated {snapshots.modified_count} leaderboards snapshot")
 
 
 async def process_sessions(sessions : AsyncGenerator[tuple[List[Any], List[Any], List[Any], Any, Any] | None, Any]):
@@ -100,12 +102,12 @@ async def process_sessions(sessions : AsyncGenerator[tuple[List[Any], List[Any],
             continue
             
         target, users, models, game, leaderboard = game
-        step = leaderboard["step"]
+        step = 0.1
 
 
-        user_elo   = { l["id"] : l["elo"] for l in leaderboard["players"] }
-        model_elo  = { l["id"] : l["elo"] for l in leaderboard["models"] }
-        target_elo = { l["target"] : l["elo"] for l in leaderboard["targets"] }
+        user_elo   = { l["id"] : [l["elo"], 0] for l in leaderboard["players"] }
+        model_elo  = { l["id"] : [l["elo"], 0] for l in leaderboard["models"] }
+        target_elo = { l["id"] : [l["elo"], 0] for l in leaderboard["targets"] }
 
         game_sessions = game["sessions"]
 
@@ -147,24 +149,52 @@ async def process_sessions(sessions : AsyncGenerator[tuple[List[Any], List[Any],
             beta -= step * grad  # update new beta
 
         # join new elo with previous leaderboard elo's
-        user_elo   |= { users[j]:  float(beta[j]) for j in range(len(users)) }
-        model_elo  |= { models[j]: -float(beta[len(users) + j]) for j in range(len(models)) }
-        target_elo |= { target[j]: -float(beta[len(users) + len(models) + j]) for j in range(len(target)) }
+        user_elo |= {
+            users[j]: [
+                float(beta[j]), 
+                1 if users[j] in user_elo and float(beta[j]) > user_elo[users[j]][0]  # Increased
+                else -1 if users[j] in user_elo and float(beta[j]) < user_elo[users[j]][0]  # Decreased
+                else 0  # New entry or no change
+            ] 
+            for j in range(len(users))
+        }
+        model_elo |= {
+            models[j]: [
+                -float(beta[len(users) + j]),
+                1 if models[j] in model_elo and -float(beta[len(users) + j]) > model_elo[models[j]][0]  # Increased
+                else -1 if models[j] in model_elo and -float(beta[len(users) + j]) < model_elo[models[j]][0]  # Decreased
+                else 0  # New entry or no change
+            ]
+            for j in range(len(models))
+        }
+
+        target_elo |= {
+            target[j]: [
+                -float(beta[len(users) + len(models) + j]),
+                1 if target[j] in target_elo and -float(beta[len(users) + len(models) + j]) > target_elo[target[j]][0]  # Increased
+                else -1 if target[j] in target_elo and -float(beta[len(users) + len(models) + j]) < target_elo[target[j]][0]  # Decreased
+                else 0  # New entry or no change
+            ]
+            for j in range(len(target))
+        }
 
 
         # FIXME: this is static, we can only take P(Y = 1 | X^{model}, X^{target}, X^{player}).
-        leaderboard["players"] = list(map(lambda item: dict(id=item[0], elo=item[1]), 
+        # item[0]    user id
+        # item[1][0] elo score
+        # 
+        leaderboard["players"] = list(map(lambda item: dict(id=item[0], elo=item[1][0], delta=item[1][1]), 
                                      user_elo.items()))
-        leaderboard["models"]  = list(map(lambda item: dict(id=item[0], elo=item[1]), 
+        leaderboard["models"]  = list(map(lambda item: dict(id=item[0], elo=item[1][0], delta=item[1][1]), 
                                      model_elo.items()))
-        leaderboard["targets"]  = list(map(lambda item: dict(id=item[0], elo=item[1]), 
+        leaderboard["targets"]  = list(map(lambda item: dict(id=item[0], elo=item[1][0], delta=item[1][1]), 
                                      target_elo.items()))
 
         
         leaderboard["mean"] = {
-            "player" : float(np.array(list(user_elo.values())).mean()),
-            "model"  : float(np.array(list(model_elo.values())).mean()),
-            "target" : float(np.array(list(target_elo.values())).mean()), 
+            "players" : float(np.array(list(map(lambda x : x[0], user_elo.values()))).mean()),
+            "models"  : float(np.array(list(map(lambda x : x[0], model_elo.values()))).mean()),
+            "targets" : float(np.array(list(map(lambda x : x[0], target_elo.values()))).mean()), 
         }
 
         updated_leaderboards.append(leaderboard)
