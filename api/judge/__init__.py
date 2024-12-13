@@ -69,7 +69,7 @@ def get_bad_word() -> Dict[str, Any]:
         "Plonker",
         "Dick"
     )
-    return { "kwargs" : { "target" : random.choices(samples) } }
+    return { "kwargs" : { "target" : random.choice(samples) } }
 
 # No Refunds
 
