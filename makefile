@@ -7,7 +7,7 @@ test:
 	pytest -v api/test/test_auth.py -W ignore::DeprecationWarning -v
 
 backend:
-	uvicorn api.main:app --reload --reload-dir api
+	cd api; uvicorn api.main:app --reload --reload-dir api
 
 frontend:
 	[ -d "node_modules" ] || npm install --legacy-peer-deps
