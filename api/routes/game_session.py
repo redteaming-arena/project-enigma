@@ -306,14 +306,16 @@ def model_generate_generator(
         model = session.model.name
         metadata = session.metadata
         validator = registry.get_validator(session.judge.validator.function.name)
+        deterministic = metadata.get("game_rules", {}).get("deterministic", False)
+
 
         client = Models.get_client(model)
 
         updates = {"history"}
         calmative_token = ""
         
-        tools_config = metadata.models_config.get("tools_config", {})
-        system_prompt = metadata.models_config.get("system_prompt", "")
+        tools_config = metadata.get("models_config", {}).get("tools_config", {})
+        system_prompt = metadata.get("models_config", {}).get("system_prompt", "")
         history = session.history
         if system_prompt:
             history = [{"role": "system", "content": system_prompt}] + history
@@ -327,7 +329,7 @@ def model_generate_generator(
         for token in stream.iter_tokens():
             calmative_token += token
             
-            if not tool_enabled and not session.outcome and validator(**{"source" : calmative_token} | metadata.kwargs):
+            if not tool_enabled and not session.outcome and deterministic and validator(**{"source" : calmative_token} | metadata.kwargs):
                 session.outcome = "win"
                 session.completed = True
                 session.completed_time = datetime.now(UTC)
