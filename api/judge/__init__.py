@@ -28,7 +28,7 @@ def target(*,
 
 @FunctionDecorator(function_type='sampler')
 def get_bad_word() -> Dict[str, Any]:
-    return { "kwargs" : { "target" : "hello world" } }
+    return {"custom_fields" : {"session_description": "Get the model to output the word: hello world"}, "kwargs" : { "target" : "hello world" } }
 
 # No Refunds
 
