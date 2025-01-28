@@ -1,10 +1,11 @@
+from __future__ import annotations
 import jwt
 
 from datetime import datetime, UTC
 
 from bson.errors import InvalidId
 from bson import ObjectId
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Any
 
 from jwt.exceptions import InvalidTokenError
 
@@ -16,55 +17,33 @@ from api.core.config import settings
 from api.core.security import ALGORITHM, verify_expired
 from api.models import User
 from api.utils import logger
+from api.db import DatabaseManager
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-class DatabaseManager:
-    client: Optional[AsyncIOMotorClient] = None
-    db: Optional[AsyncIOMotorDatabase] = None
 
-    @classmethod
-    def get_client(cls) -> AsyncIOMotorClient:
-        if cls.client is None:
-            cls.client = AsyncIOMotorClient(settings.MONGODB_DATABASE_URI)
-        return cls.client
-
-    @classmethod
-    def get_db(cls) -> AsyncIOMotorDatabase:
-        if cls.db is None:
-            cls.db = cls.get_client()[settings.MONGODB_NAME]
-        return cls.db
-    
-    @classmethod
-    def close_db(cls) -> None:
-        if cls.db is not None:
-            cls.get_client().close()
-        return None
-
+# public database access
 async def get_database() -> AsyncIOMotorDatabase:
     return DatabaseManager.get_db()
+
 
 async def close_database() -> None:
     return DatabaseManager.close_db()
 
-Database = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 
-async def get_current_user(
-        token: Annotated[str, Depends(oauth2_scheme)],
-        db: Database
-    ) -> User:
+async def get_current_user(token: "AuthToken", db: "Database") -> User:
     """
     Validate JWT token and return current user.
-    
+
     Args:
         token (str): JWT token from authorization header
         db (Database): Database session
-        
+
     Returns:
         User: Current authenticated user
-        
+
     Raises:
         HTTPException: If token is invalid or user not found
     """
@@ -78,11 +57,9 @@ async def get_current_user(
                 detail="Could not validate credentials due to expired token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[ALGORITHM]
-        )
-        
+
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+
         if (user := payload.get("sub", None)) is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -98,7 +75,7 @@ async def get_current_user(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = await db.users.find_one({"_id": user_id})
 
     if user is None:
@@ -117,10 +94,11 @@ async def get_current_user(
 
     return User.model_validate(user)
 
+
 async def clear_user_token(db: Database, user_id: ObjectId) -> None:
     """
     Clear a user's access token when it's no longer valid.
-    
+
     Args:
         db : Database session
         user_id: User's ObjectId
@@ -128,12 +106,16 @@ async def clear_user_token(db: Database, user_id: ObjectId) -> None:
     try:
         await db.users.update_one(
             {"_id": user_id},
-            {"$set": {"access_token": None, "last_signout" : datetime.now(UTC)}}
+            {"$set": {"access_token": None, "last_signout": datetime.now(UTC)}},
         )
     except Exception as e:
         # Log error but don't raise - this is a cleanup operation
         logger.error(f"Interpret: {e}")
         pass
 
-# Annotation type that used in context we desire the user information
-CurrentUser = Annotated[User, Depends(get_current_user)]
+
+Database = Annotated[
+    AsyncIOMotorDatabase, Depends(get_database)
+]  # authentication of Database connection
+AuthToken = Annotated[str, Depends(oauth2_scheme)]  # authentication of Token
+AuthUser = Annotated[User, Depends(get_current_user)]  # authentication of User

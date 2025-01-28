@@ -44,18 +44,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def verify_expired(token: str | None, _id : str = None) -> bool:
+def verify_expired(token: str | None, _id: str = None) -> bool:
     """
     Verify if a JWT token has expired by checking its expiration timestamp.
-    
+
     Args:
         token (str): The JWT token to verify
         secret_key (str): Secret key used to decode the token
         algorithm (str): Algorithm used for token encoding/decoding
-    
+
     Returns:
         Dict[str, Any]: The decoded payload if valid
-        
+
     Raises:
         jwt.ExpiredSignatureError: If token has expired
         jwt.InvalidTokenError: If token is invalid
@@ -68,23 +68,23 @@ def verify_expired(token: str | None, _id : str = None) -> bool:
         # Decode the token without verification first to check exp claim
         payload = jwt.decode(
             token,
-            options={"verify_signature": False}  # First pass without verification
+            options={"verify_signature": False},  # First pass without verification
         )
-        
+
         # Check if expiration claim exists
         if (exp_timestamp := payload.get("exp")) is None:
             raise ValueError("Token has no expiration claim")
-            
+
         # Get current timestamp
         current_timestamp = datetime.utcnow().timestamp()
-        
+
         # Check if token has expired
         if current_timestamp > exp_timestamp:
             return True
-            
+
         # If we get here then it is not expired
         return False
-        
+
     except jwt.InvalidTokenError as e:
         raise jwt.InvalidTokenError(f"Invalid token: {str(e)}")
     except Exception as e:
@@ -92,5 +92,5 @@ def verify_expired(token: str | None, _id : str = None) -> bool:
 
 
 def get_password_hash(password: str) -> str:
-    """ return hash password """
+    """return hash password"""
     return pwd_context.hash(password)

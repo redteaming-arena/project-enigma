@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import json
 import asyncio
 import logging
@@ -28,7 +27,7 @@ from api.models import StreamResponse
 
 from api.models import User
 
-logger = logging.getLogger('uvicorn.error')
+logger = logging.getLogger("uvicorn.error")
 
 NoArgsNoReturnFuncT = Callable[[], None]
 NoArgsNoReturnAsyncFuncT = Callable[[], Coroutine[Any, Any, None]]
@@ -46,7 +45,9 @@ async def _handle_func(func: NoArgsNoReturnAnyFuncT) -> None:
         await run_in_threadpool(func)
 
 
-async def _handle_exc(exc: Exception, on_exception: ExcArgNoReturnAnyFuncT | None) -> None:
+async def _handle_exc(
+    exc: Exception, on_exception: ExcArgNoReturnAnyFuncT | None
+) -> None:
     if on_exception:
         if asyncio.iscoroutinefunction(on_exception):
             await on_exception(exc)
@@ -110,11 +111,14 @@ def repeat_every(
                 while max_repetitions is None or repetitions < max_repetitions:
                     try:
                         if logger is not None:
-                            logger.info(f"{"Running":<10}: {func.__name__} cron job {datetime.now(UTC)}")
+                            logger.info(
+                                f"{"Running":<10}: {func.__name__} cron job {datetime.now(UTC)}"
+                            )
                         await _handle_func(func)
                         if logger is not None:
-                            logger.info(f"{"Finish":<10}: {func.__name__} {"job":<8} {datetime.now(UTC)}")
-
+                            logger.info(
+                                f"{"Finish":<10}: {func.__name__} {"job":<8} {datetime.now(UTC)}"
+                            )
 
                     except Exception as exc:
                         if logger is not None:
@@ -122,7 +126,9 @@ def repeat_every(
                                 "'logger' is to be deprecated in favor of 'on_exception' in the 1.0 release.",
                                 DeprecationWarning,
                             )
-                            formatted_exception = "".join(format_exception(type(exc), exc, exc.__traceback__))
+                            formatted_exception = "".join(
+                                format_exception(type(exc), exc, exc.__traceback__)
+                            )
                             logger.error(formatted_exception)
                         if raise_exceptions:
                             warnings.warn(
@@ -156,131 +162,128 @@ def generate_hash(input_string: str) -> str:
     """
     return hashlib.md5(input_string.encode()).hexdigest()
 
+
 def generate(txt: str, primary: int | None = None, secondary: int | None = None) -> str:
-        """Generate a 5x5 identicon image based on the provided text.
+    """Generate a 5x5 identicon image based on the provided text.
 
-        Args:
-            txt (str): The text to be hashed to generate the identicon.
-            primary (int, optional): The primary color for the identicon in RGB integer format. Defaults to 0XB4F8C8.
-            secondary (int, optional): The secondary color for the identicon in RGB integer format. Defaults to 0xFFFFFF.
+    Args:
+        txt (str): The text to be hashed to generate the identicon.
+        primary (int, optional): The primary color for the identicon in RGB integer format. Defaults to 0XB4F8C8.
+        secondary (int, optional): The secondary color for the identicon in RGB integer format. Defaults to 0xFFFFFF.
 
-        Returns:
-            np.ndarray: A 5x5 identicon image represented as a NumPy array.
+    Returns:
+        np.ndarray: A 5x5 identicon image represented as a NumPy array.
 
-        Raises:
-            ValueError: If primary or secondary colors are not in the expected format.
-        """
-        if primary is None:
-            primary = 0xFFFFFF
-        if secondary is None:
-            secondary = random.choice([0x00FF00, 0x800080, 0xFF0000, 0xFFC0CB, 0x0000FF])
-        # Validate color format and convert to RGB tuple if necessary
-        def validate_and_convert_color(color):
-            if isinstance(color, tuple):
-                if len(color) != 3:
-                    raise ValueError("Color tuples must have three components.")
-                return color
-            elif isinstance(color, int):
-                if not (0 <= color <= 0xFFFFFF):
-                    raise ValueError("Color integers must be between 0x0 and 0xFFFFFF.")
-                return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+    Raises:
+        ValueError: If primary or secondary colors are not in the expected format.
+    """
+    if primary is None:
+        primary = 0xFFFFFF
+    if secondary is None:
+        secondary = random.choice([0x00FF00, 0x800080, 0xFF0000, 0xFFC0CB, 0x0000FF])
+
+    # Validate color format and convert to RGB tuple if necessary
+    def validate_and_convert_color(color):
+        if isinstance(color, tuple):
+            if len(color) != 3:
+                raise ValueError("Color tuples must have three components.")
+            return color
+        elif isinstance(color, int):
+            if not (0 <= color <= 0xFFFFFF):
+                raise ValueError("Color integers must be between 0x0 and 0xFFFFFF.")
+            return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+        else:
+            raise TypeError("Color must be a tuple or an integer.")
+
+    primary_color = validate_and_convert_color(primary)
+    secondary_color = validate_and_convert_color(secondary)
+    grid_size = 5
+    identicon = np.zeros((grid_size, grid_size, 3), dtype=np.uint8)
+
+    hash_code = generate_hash(txt)
+
+    for i in range(grid_size + 1 // 2):
+        for j in range(grid_size):
+            # Converting hash character to a number
+            hash_value = int(hash_code[i * grid_size + j], 16)
+            # If the value is even, we color the pixel
+            if hash_value % 2 == 0:
+                # Use the next three characters to determine the color
+                colour = primary_color
+                identicon[j, i] = colour
+                identicon[j, grid_size - i - 1] = colour  # Mirror the color
             else:
-                raise TypeError("Color must be a tuple or an integer.")
+                colour = secondary_color
+                identicon[j, i] = colour
+                identicon[j, grid_size - i - 1] = colour  # Mirror the color
 
-        primary_color = validate_and_convert_color(primary)
-        secondary_color = validate_and_convert_color(secondary)
-        grid_size = 5
-        identicon = np.zeros((grid_size, grid_size, 3), dtype=np.uint8)
+    i, j = identicon.shape[:2]
+    h, w = 500 // i, 500 // j
+    identicon = np.repeat(identicon, h, axis=0)
+    identicon = np.repeat(identicon, w, axis=1)
 
-        hash_code = generate_hash(txt)
+    # Image to PIL
+    img = Image.fromarray(identicon)
 
-        for i in range(grid_size+1 // 2):
-            for j in range(grid_size):
-                # Converting hash character to a number
-                hash_value = int(hash_code[i * grid_size + j], 16)
-                # If the value is even, we color the pixel
-                if hash_value % 2 == 0:
-                    # Use the next three characters to determine the color
-                    colour = primary_color
-                    identicon[j, i] = colour
-                    identicon[j, grid_size - i - 1] = colour  # Mirror the color
-                else:
-                    colour = secondary_color
-                    identicon[j, i] = colour
-                    identicon[j, grid_size - i - 1] = colour  # Mirror the color
+    # convert image buffer to webp
+    buffered = BytesIO()
+    img.save(buffered, format="WEBP")
+    img_bytes = buffered.getvalue()
+
+    return f"data:image/webp;base64,{base64.b64encode(img_bytes).decode("utf-8")}"
 
 
-        i, j = identicon.shape[:2]
-        h, w = 500 // i, 500 // j
-        identicon = np.repeat(identicon, h, axis=0)
-        identicon = np.repeat(identicon, w, axis=1)
-
-        # Image to PIL
-        img = Image.fromarray(identicon)
-
-        # convert image buffer to webp
-        buffered = BytesIO()
-        img.save(buffered, format="WEBP")
-        img_bytes = buffered.getvalue()
-        
-        return f"data:image/webp;base64,{base64.b64encode(img_bytes).decode("utf-8")}"
-
-
-def to_object_id(id : str | ObjectId) -> ObjectId:
-    try: 
+def to_object_id(id: str | ObjectId) -> ObjectId:
+    try:
         if isinstance(id, str):
             return ObjectId(id)
         return id
     except InvalidId as e:
         raise e
-    
 
-def handleStreamResponse(
-    *,
-    retry: int = 1000,
-    include_end: bool = False
-):
+
+def handleStreamResponse(*, retry: int = 1000, include_end: bool = False):
     """
     Decorator for handling streaming responses in FastAPI endpoints.
-    
+
     Args:
         f: The async generator function to wrap
         retry: Milliseconds to wait before retry on connection failure
         include_end: Whether to include an end event in the stream
-        
+
     Returns:
         Wrapped async generator function that yields properly formatted SSE events
     """
+
     def decorator(func: Callable[..., Generator[Any, None]]):
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Generator[dict, None]:
             try:
                 for item in func(*args, **kwargs):
-                    if hasattr(item, 'streamingResponse'):
+                    if hasattr(item, "streamingResponse"):
                         yield item.streamingResponse()
                     elif isinstance(item, dict):
                         yield f"{json.dumps(item)}"
                     elif isinstance(item, str):
                         yield item
                 if include_end:
-                    yield StreamResponse(
-                        type="end",
-                        data={}
-                    )
-                    
+                    yield StreamResponse(type="end", data={})
+
             except Exception as e:
                 logger.error(f"Streaming Event Error: {e}")
                 yield {
                     "event": "error",
                     "id": "error_message",
                     "retry": retry,
-                    "data": str(e)
+                    "data": str(e),
                 }
+
         return wrapper
+
     return decorator
 
 
-def convert_list_to_one_hot_vector(*x : Tuple[int, ...]):
+def convert_list_to_one_hot_vector(*x: Tuple[int, ...], min_size: int = None):
     """convert list of int to a one hot vector representation
 
     Returns:
@@ -288,11 +291,11 @@ def convert_list_to_one_hot_vector(*x : Tuple[int, ...]):
     """
     if len(x) == 0:
         return None
-    
+
     a = np.array(x)
-    row, col = a.size, int(a.max()) + 1 
+    row = a.size
+    col = int(a.max()) + 1 if min_size is None else max(int(a.max()) + 1, min_size)
     b = np.zeros((row, col))
     x = np.arange(row)
     b[x, a] = 1
     return b
-

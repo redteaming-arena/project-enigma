@@ -11,16 +11,12 @@ from api.crud import get_game_from_id, get_games
 from api.models import Game, StreamResponse
 from api.utils import handleStreamResponse
 
-
-
+__all__ = ["router"]
 router = APIRouter()
 
+
 @router.get("/game")
-async def get_all_games(
-    db : Database,
-    s : int,
-    l : Optional[int] = None
-) -> List[Game]:
+async def get_all_games(db: Database, s: int, l: Optional[int] = None) -> List[Game]:
     """
     Get all games and convert them to GamePublic model.
     Accessible via both /game/ and /game
@@ -28,22 +24,21 @@ async def get_all_games(
     try:
         response = []
         async for game in get_games(db=db, skip=s, limit=l):
-                response.append(
-                     Game(
-                          id=str(game.id),
-                          title=game.title,
-                          image=game.image
-                    ).to_dict()
+            response.append(
+                Game(
+                    _id=str(game.id),
+                    title=game.title,
+                    image=game.image,
+                    author=game.author,
+                    description=game.description,
                 )
-                
+            )
         return response
     except HTTPException as e:
         raise e
-    
+
 
 @router.get("/game/{id}")
-async def game_from_id(db : Database, id : str) -> Any:
+async def game_from_id(db: Database, id: str) -> Any:
     response = await get_game_from_id(db=db, id=id)
     return response
-
-

@@ -8,7 +8,6 @@ and direct database operations, promoting code reusability and maintainability.
 
 Key Features:
 - User management operations (create, retrieve, authenticate)
-- Game-related operations (TBD)
 
 Usage:
     from api import crud
@@ -16,11 +15,8 @@ Usage:
     # In your route handler:
     user = await crud.get_user_by_username(db=db, username="example")
 
-Dependencies:
-- FastAPI for HTTP exception handling
-- MongoDB for database operations
-- Custom security utils for password hashing
 """
+
 import re
 
 
@@ -31,14 +27,15 @@ from fastapi import HTTPException, status
 
 from api.deps import Database
 from api.core.security import get_password_hash, verify_password
-from api.models import User,\
-                       UserRegister,\
-                       Game,\
-                       GameSession,\
-                       GameSessionPublic,\
-                       Model,\
-                       Judge,\
-                       Leaderboard
+from api.models import (
+    User,
+    UserRegister,
+    Game,
+    GameSession,
+    GameSessionPublic,
+    Model,
+    Judge,
+)
 from api.judge import registry
 from api.utils import generate, to_object_id, logger
 from bson import ObjectId
@@ -48,28 +45,41 @@ import random
 
 # = User ==============================================================
 
+
 async def get_user_by_username(*, db: Database, username: str) -> Optional[User]:
     """Retrieve user from database by username.
-    
+
     Args:
         db (Database): Database session
         username (str): Username to look up
-        
+
     Returns:
         Optional[User]: User if found, None otherwise
+    Raise:
+        HTTPException: If exception of any kind occurs.
     """
-    user_data = await db.users.find_one({"username": re.compile(f"^{username}$", re.IGNORECASE)})
-    if user_data:
-        return User(**user_data)
+    try:
+        user_data = await db.users.find_one(
+            {"username": re.compile(f"^{username}$", re.IGNORECASE)}
+        )
+        if user_data:
+            return User(**user_data)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error finding user: {str(e)}",
+        )
     return None
 
+
 async def get_user_by_email(*, db: Database, email: str) -> Optional[User]:
-    """Retrieve user from database by email.
-    
+    """Oauth requires to retrieve user from database by email.
+
     Args:
         db (Database): Database session
         email (str): Email to look up
-        
+
     Returns:
         Optional[User]: User if found, None otherwise
     """
@@ -79,7 +89,9 @@ async def get_user_by_email(*, db: Database, email: str) -> Optional[User]:
     return None
 
 
-async def find_user(*, db: Database, username: str) -> Union[User, None]:
+async def get_user_by_username_ignore_case(
+    *, db: Database, username: str
+) -> Union[User, None]:
     """
     Find a user by username, checking both case-sensitive and case-insensitive matches
     Args:
@@ -89,70 +101,149 @@ async def find_user(*, db: Database, username: str) -> Union[User, None]:
         User document if found, None otherwise
     """
     try:
-        user = await db.users.find_one({
-            "$or": [
-                {"username": username},  # Exact case-sensitive match
-                {"username": re.compile(f"^{username}$", re.IGNORECASE)}  # Case-insensitive match
-            ]
-        })
+        user = await db.users.find_one(
+            {
+                "$or": [
+                    {"username": username},  # Exact case-sensitive match
+                    {
+                        "username": re.compile(f"^{username}$", re.IGNORECASE)
+                    },  # Case-insensitive match
+                ]
+            }
+        )
 
         if user is None:
             return None
-        
+
         return User(**user)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error finding user: {str(e)}"
+            detail=f"Error finding user: {str(e)}",
         )
 
-async def update_username(*, db : Database, username : str):
-    existing_user = await get_user_by_username(
-        db=db, username=username
-    )
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Interrupt username already registered"
-        )
-    
-    db["users"].update_one({
-        "_id" : existing_user.id
-    })
+
+async def get_user_stats(*, db: Database, user_id: str | ObjectId):
+    """user states such as games played list of sessions"""
+    try:
+
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        user = await db.users.aggregate(
+            [
+                {"$match": {"_id": user_id}},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "games_played": {"$ifNull": ["$games_played", -1]},
+                    }
+                },
+            ]
+        ).to_list(length=1)
+
+        user = user[0] if user else None
+
+        pipeline = [
+            {"$match": {"user_id": user_id, "completed": True}},
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "agent_id",
+                    "foreignField": "_id",
+                    "as": "model",
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_id",
+                    "foreignField": "_id",
+                    "as": "user",
+                }
+            },
+            {"$unwind": {"path": "$model", "preserveNullAndEmptyArrays": True}},
+            {"$unwind": {"path": "$user", "preserveNullAndEmptyArrays": True}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "completed_time": 1,
+                    "outcome": 1,
+                    "provider": "$model.provider",
+                }
+            },
+        ]
+
+        sessions = await db.sessions.aggregate(pipeline).to_list(length=None)
+
+        # In case where games_played does not exist early users...
+        games_played = max(0, len(sessions))
+        if user["games_played"] < 0:
+            await db.users.update_one(
+                {"_id": user_id}, {"$set": {"games_played": games_played}}
+            )
+
+        result = dict(games_played=games_played, sessions=sessions)
+        return result
+
+    except Exception as e:
+        raise e
+
+
+async def update_username(*, db: Database, id: ObjectId, new_username: str) -> bool:
+    """update user username
+
+    precondition:
+        - current_username != new_username
+
+    Args:
+        db (Database)      : database session
+        new_username (str) : new username str
+
+    Return:
+        bool if the username was changed or not
+    """
+
+    result = await db["users"].update_one({"_id": id, "username": new_username})
+
+    if result.modified_count == 0:
+        raise False
+    return True
 
 
 async def create_user(*, db: Database, user_create: UserRegister) -> User:
     """Create new user in database.
-    
+
     Args:
         db (Database): Database session
         user_create (UserRegister): User registration data
-        
+
     Returns:
         User: Created user object
-        
+
     Raises:
         HTTPException: If username already exists or if there's a database error
     """
     try:
 
+        # Oauth provider
         if user_create.provider == "google":
             user_data = user_create.model_dump()
-            user_data["created_at"]   = datetime.now(UTC)
-            user_data["password"]     = None
-            user_data["last_login"]   = None
+            user_data["created_at"] = datetime.now(UTC)
+            user_data["password"] = None
+            user_data["last_login"] = None
             user_data["last_signout"] = None
             user_data["access_token"] = None
         else:
+            # if the user exist then raise Error
             existing_user = await get_user_by_username(
                 db=db, username=user_create.username
             )
             if existing_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Interrupt username already registered"
+                    detail="username already registered",
                 )
-
 
             hashed_password = get_password_hash(user_create.password)
             user_data = user_create.model_dump()
@@ -176,12 +267,12 @@ async def create_user(*, db: Database, user_create: UserRegister) -> User:
         # Log the error here if you have logging configured
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Interrupt an unexpected error occurred"
+            detail="an unexpected error occurred",
         ) from e
 
-async def authenticate(*, db : Database, username : str, password : str) -> Optional[User]:
-    """
-    
+
+async def is_user(*, db: Database, username: str, password: str) -> Optional[User]:
+    """authenticate that username matches the password of the account trying to access
 
     Args:
         session (Annotated[AsyncIOMotorDatabase, Depends(get_db)]): client session to the backend
@@ -191,154 +282,71 @@ async def authenticate(*, db : Database, username : str, password : str) -> Opti
     Returns:
         Optional[User]: if the user does not exist or the password does not match return None else User
     """
-    user = await find_user(db=db, username=username)
+    user = await get_user_by_username(db=db, username=username)
     if user is None:
         return None
     if not verify_password(password, user.password):
         return None
     return user
 
-async def user_stats(*, db : Database, user_id : str | ObjectId):
-    """ user states such as games played list of sessions """
-    try :
-        
-        if isinstance(user_id, str):
-            user_id = ObjectId(user_id) 
-        
-        user = await db.users.aggregate([
-            {
-                "$match": {
-                    "_id": user_id 
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0, 
-                    "games_played": {
-                        "$ifNull": ["$games_played", -1]
-                    }
-                }
-            }
-        ]).to_list(length=1)
 
-        user = user[0] if user else None
-
-        pipeline = [
-            {
-                "$match": { 
-                    "user_id": user_id,
-                    "completed": True
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "models",
-                    "localField": "agent_id",
-                    "foreignField": "_id",
-                    "as": "model"
-                }
-            },
-                        {
-                "$lookup": {
-                    "from": "users",
-                    "localField": "user_id",
-                    "foreignField": "_id",
-                    "as": "user"
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$model",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },{
-                "$unwind": {
-                    "path": "$user",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "completed_time": 1,
-                    "outcome": 1,
-                    "provider" : "$model.provider",
-                }
-            }
-        ]
-
-        sessions = await db.sessions.aggregate(pipeline).to_list(length=None)
-
-        # In case where games_played does not exist early users...
-        games_played = max(0, len(sessions))
-        if user["games_played"] < 0:
-            await db.users.update_one(
-                {"_id": user_id},
-                {"$set": {"games_played": games_played}}
-            )
-        
-        result = dict(games_played=games_played, sessions=sessions)
-        return result
-
-    except Exception as e:
-        raise e
 # =====================================================================
 
-# NOTE add more 
-
 # = Game ==============================================================
+
 
 async def get_game_from_id(*, db: Database, id: str) -> Game:
     """
     Fetch Game object by its game_id including associated judge information
-    
+
     Args:
         session: MongoDB session instance
         game_id (str): Unique ID of Game collection
-        
+
     Returns:
         Game: Game object with judge information, if found
-        
+
     Raises:
         HTTPException: If game_id is invalid or game is not found
     """
     try:
         id = to_object_id(id)
-        game_data = await db.games.find_one({
-            "_id": id
-        })
+        game_data = await db.games.find_one({"_id": id})
 
     except InvalidId:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Interrupt not a valid ID"
+            status_code=status.HTTP_404_NOT_FOUND, detail="not a valid ID"
         )
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Interrupt exception thrown trying to find game form ID"
+            detail="exception thrown trying to find game form ID",
         )
-    
+
     if not game_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interrupt game not found from ID: {id}"
+            detail=f"game not found from ID: {id}",
         )
-    
-    game_data["id"] = game_data["_id"]; del game_data["_id"] 
+
+    game_data["id"] = game_data["_id"]
+    del game_data["_id"]
 
     return Game(**game_data)
 
-async def get_games(*, db: Database, skip : int = 0, limit : int | None= None ) -> AsyncGenerator[Game, None]:
+
+async def get_games(
+    *, db: Database, skip: int = 0, limit: int | None = None
+) -> AsyncGenerator[Game, None]:
     """
     Fetch all games from the database
-    
+
     Args:
         session: MongoDB session instance
-        
+
     Returns:
         List[Game]: List of all games
-        
+
     Raises:
         HTTPException: If there's an error retrieving games
     """
@@ -347,37 +355,40 @@ async def get_games(*, db: Database, skip : int = 0, limit : int | None= None ) 
         query = db.games.find({}).skip(skip=skip)
         if limit is not None:
             query = query.limit(limit=limit)
-        
+
         game_data = await query.to_list(length=None)
 
         if not game_data:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Interrupt something went wrong when finding the games"
+                detail="something went wrong when finding the games",
             )
-        
+
         for game in game_data:
             game["id"] = game["_id"]
             del game["_id"]
             yield Game(**game)
-    
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Interrupt retrieving games: {str(e)}"
+            detail=f"retrieving games: {str(e)}",
         )
+
 
 # =====================================================================
 
-
 # = Session ==============================================================
 
-async def create_game_session(*, 
-                              db: Database, 
-                              game : Game,
-                              judge : Judge,
-                              user_id:  Union[str, ObjectId], 
-                              model_id: Union[str, ObjectId]) -> GameSession:
+
+async def create_game_session(
+    *,
+    db: Database,
+    game: Game,
+    judge: Judge,
+    user_id: Union[str, ObjectId],
+    model_id: Union[str, ObjectId],
+) -> GameSession:
     """
     Creates new game session in database
 
@@ -388,44 +399,51 @@ async def create_game_session(*,
         model_id (str): ID of the model for the session
         target (str): Randomly chosen prompt from the game's contexts
         session: MonogDB session instance
-    
+
     Returns:
         GameSession: The created GameSession object
     """
 
     try:
 
-        user_id  = to_object_id(user_id)
+        # MongoDB requires id be ObjectID object.
+        user_id = to_object_id(user_id)
         model_id = to_object_id(model_id)
         game_id = to_object_id(game.id)
         judge_id = to_object_id(judge.id)
 
+        # judge must contain a sampler function if not throw
+        # error.
         if (sample_fn := judge.sampler.function) is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Missing sampler function"
-            )
+            raise HTTPException(status_code=500, detail="Missing sampler function")
 
         # we need to sample from out game distribution sample function.
         # Properties a sampler should hold if game needs to change model
         # configurator then we need to add a meta data object to which it will be deleted
-        # after it's been allocated to the game session 
-        sample = registry.get_sampler(sample_fn.name)()
-
+        # after it's been allocated to the game session
+        name = sample_fn.name
+        # registry get_sample return callable
+        # NOTE: if we get the user relative ranking withing the
+        #       distribution we can sampler harder problems
+        logger.info("sample function")
+        sample = registry.get_sampler(name)()
+        logger.info("sample finished")
         # check if game is deterministic if so then
         # there is a target target within the sample
-        description=None
-        if game.metadata.game_rules.get("deterministic", False) \
-           and (target := sample.get("kwargs", {}).get("target", None)) is not None:
-            description = f"{game.session_description}: {target}"
+        description = None
+        # NOTE shizhouxing merge "Setting session_description by sampler #21"
+        if "session_description" in sample:
+            description = sample["session_description"]
         else:
             description = f"{game.session_description}"
 
+        # update metadata
         metadata = game.metadata.model_dump(exclude_none=True)
         if "kwargs" in sample:
             metadata["kwargs"] = sample["kwargs"]
-        if "model_config" in sample:
-            metadata["model_config"] |= sample["model_config"]
+        if "models_config" in sample:
+            logger.info(metadata)
+            metadata["models_config"] |= sample["models_config"]
 
         new_session = GameSession(
             user_id=user_id,
@@ -440,123 +458,107 @@ async def create_game_session(*,
             completed_time=None,
             outcome=None,
             shared=None,
-            metadata=metadata)
+            metadata=metadata,
+            target=sample.get("target", None),
+        )
 
-        
-        result = await db.sessions.insert_one(new_session\
-                                              .create_session()) 
+        session = new_session.create_session()
 
+        result = await db.sessions.insert_one(session)
         new_session.id = result.inserted_id
+
         if game:
-            await db.users.update_one(
-                {"_id": user_id},  # Match the game by its _id
-                {"$inc": {"games_played": 1}}  # Increment games_played by 1
-            )
+            await db.users.update_one({"_id": user_id}, {"$inc": {"games_played": 1}})
 
     except InvalidId:
         logger.error(e)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ID format"
         )
     except Exception as e:
         logger.error(e)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Something else went wrong"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Something else went wrong"
         )
     return new_session
 
 
-async def delete_game_session(db : Database, session_id: str) -> None:
-    """ delete session for testing """
+async def delete_game_session(db: Database, session_id: str) -> None:
+    """delete session for testing"""
     await db.sessions.delete_one({"_id": ObjectId(session_id)})
 
 
 async def get_session_from_shared_id(*, shared_id: str, db: Database):
     try:
         shared_id = ObjectId(shared_id)
+
+        pipeline = [
+            {"$match": {"shared": shared_id, "completed": True}},
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_id",
+                    "foreignField": "_id",
+                    "as": "user",
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "agent_id",
+                    "foreignField": "_id",
+                    "as": "model",
+                }
+            },
+            {"$unwind": {"path": "$user", "preserveNullAndEmptyArrays": True}},
+            {"$unwind": {"path": "$model", "preserveNullAndEmptyArrays": True}},
+            {
+                "$project": {
+                    "id": "$_id",
+                    "_id": 0,
+                    "title": 1,
+                    "history": 1,
+                    "user_id": 1,
+                    "completed": 1,
+                    "outcome": 1,
+                    "completed_time": 1,
+                    "create_time": 1,
+                    "start_time": 1,
+                    "description": 1,
+                    "user": {
+                        "username": 1,
+                    },
+                    "model": 1,
+                }
+            },
+        ]
+
+        cursor = db.sessions.aggregate(pipeline)
+        game_sessions = await cursor.to_list(length=None)
+
+        if not game_sessions:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,  # Changed from 204 to 404
+                detail="Game session not found",
+            )
+
+    except HTTPException as h:
+        raise h
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid session_id format"
-        )
-    
-    pipeline = [
-        {
-            "$match": {
-                "shared": shared_id,
-                "completed" : True
-            }
-        },
-        {
-            "$lookup": {
-                "from": "users",
-                "localField": "user_id",
-                "foreignField": "_id",
-                "as": "user"
-            }
-        },
-         {
-            "$lookup": {
-                "from": "models",
-                "localField": "agent_id",
-                "foreignField": "_id",
-                "as": "model"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$user",
-                "preserveNullAndEmptyArrays": True
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$model",
-                "preserveNullAndEmptyArrays": True
-            }
-        },
-        {
-            "$project": {
-                "id": "$_id",
-                "_id": 0,
-                "title": 1,
-                "history": 1,
-                "user_id": 1,
-                "completed": 1,
-                "outcome": 1,
-                "completed_time": 1,
-                "create_time": 1,
-                "start_time" : 1,
-                "description" : 1,
-                "user": {
-                    "username" : 1,
-                },
-                "model" : 1
-
-            }
-        }
-    ]
-
-    cursor = db.sessions.aggregate(pipeline)
-    game_sessions = await cursor.to_list(length=None)
-    print(game_sessions)
-
-    if not game_sessions:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,  # Changed from 204 to 404
-            detail="Game session not found"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id format"
         )
 
     return GameSessionPublic(**game_sessions[0])
 
 
-async def get_session(*, 
-                      session_id : str, 
-                      user_id : ObjectId, 
-                      completed : bool | None = None,
-                      db: Database) -> GameSessionPublic:
+async def get_session(
+    *,
+    session_id: ObjectId,
+    user_id: ObjectId,
+    completed: bool | None = None,
+    db: Database,
+) -> GameSessionPublic:
     """
     Get session object by session_id
 
@@ -567,110 +569,100 @@ async def get_session(*,
         GameSession: The GameSession object, if found
     """
     query = {}
-    try: 
-        query["_id"] = ObjectId(session_id)
+    try:
+        query["_id"] = session_id
         if user_id is not None:
             query["user_id"] = user_id
             query["visible"] = True
 
-        if completed is not None:    
+        if completed is not None:
             query["completed"] = completed
-
 
     except Exception:
         raise HTTPException(
-            status_code = status.HTTP_400_BAD_REQUEST, 
-            detail="Invalid session_id format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id format"
         )
 
-    session_data = db.sessions.aggregate([
-        {"$match": query},
-        # Join with related collections
-        {"$lookup": {
-            "from": "users",
-            "localField": "user_id",
-            "foreignField": "_id",
-            "as": "user"
-        }},
-        {"$lookup": {
-            "from": "models",
-            "localField": "agent_id",
-            "foreignField": "_id",
-            "as": "model"
-        }},
-        {"$lookup": {
-            "from": "judges",
-            "localField": "judge_id",
-            "foreignField": "_id",
-            "as": "judge"
-        }},
-        # Unwind arrays (with null preservation)
-        {"$unwind": {
-            "path": "$user",
-            "preserveNullAndEmptyArrays": True
-        }},
-        {"$unwind": {
-            "path": "$model",
-            "preserveNullAndEmptyArrays": True
-        }},
-        {"$unwind": {
-            "path": "$judge",
-            "preserveNullAndEmptyArrays": True
-        }},
-        # Project only needed fields
-       {
-        "$project": {
-            "id": "$_id", 
-            "_id": 0, 
-            "title": 1,
-            "history": 1,
-            "user_id": 1,
-            "completed": 1,
-            "outcome": 1,
-            "completed_time": 1,
-            "create_time": 1,
-            "description" : 1,
-            "start_time" : 1,
-            "user": {
-            "username": 1
+    session_data = db.sessions.aggregate(
+        [
+            {"$match": query},
+            # Join with related collections
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_id",
+                    "foreignField": "_id",
+                    "as": "user",
+                }
             },
-            "shared": {
-            "$toString": "$shared"
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "agent_id",
+                    "foreignField": "_id",
+                    "as": "model",
+                }
             },
-            "model": {
-            "name": 1,
-            "namespace" : 1,
-            "provider": 1,
-            "image": 1,
-            "metadata": 1
+            {
+                "$lookup": {
+                    "from": "judges",
+                    "localField": "judge_id",
+                    "foreignField": "_id",
+                    "as": "judge",
+                }
             },
-            "judge": {
-            "active": 1,
-            "sampler": 1,
-            "validator": 1
+            # Unwind arrays (with null preservation)
+            {"$unwind": {"path": "$user", "preserveNullAndEmptyArrays": True}},
+            {"$unwind": {"path": "$model", "preserveNullAndEmptyArrays": True}},
+            {"$unwind": {"path": "$judge", "preserveNullAndEmptyArrays": True}},
+            # Project only needed fields
+            {
+                "$project": {
+                    "id": "$_id",
+                    "_id": 0,
+                    "title": 1,
+                    "history": 1,
+                    "user_id": 1,
+                    "completed": 1,
+                    "outcome": 1,
+                    "completed_time": 1,
+                    "create_time": 1,
+                    "description": 1,
+                    "start_time": 1,
+                    "user": {"_id": 1, "username": 1},
+                    "shared": {"$toString": "$shared"},
+                    "model": {
+                        "name": 1,
+                        "namespace": 1,
+                        "provider": 1,
+                        "image": 1,
+                        "metadata": 1,
+                    },
+                    "judge": {"_id": 1, "active": 1, "sampler": 1, "validator": 1},
+                    "metadata": 1,
+                }
             },
-            "metadata": 1
-        }
-        },
-        {"$limit": 1}   
-    ])
-    
+            {"$limit": 1},
+        ]
+    )
+
     game_session = await session_data.to_list(length=None)
 
     if len(game_session) == 0 or game_session is None:
         raise HTTPException(
-            status_code=status.HTTP_204_NO_CONTENT,
-            detail="game session is not found"
+            status_code=status.HTTP_204_NO_CONTENT, detail="game session is not found"
         )
-    game = game_session.pop(0)
 
-    return GameSessionPublic(**game)
+    return GameSessionPublic(**game_session[0])
 
-async def update_game_session(*, 
-                              db : Database, 
-                              session_id: str,
-                              updated_session: GameSession,
-                              updates : List[str]):
+
+async def update_game_session(
+    *,
+    db: Database,
+    session_id: ObjectId,
+    updated_session: GameSession,
+    updates: List[str],
+):
     """
     Update an existing GameSession in the database.
 
@@ -680,27 +672,29 @@ async def update_game_session(*,
         updated_session: The GameSession object containing updated fields
     """
     try:
-        session_id_obj = ObjectId(session_id)
-    except :
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid session_id format"
+
+        result = await db.sessions.update_one(
+            {"_id": session_id},
+            {"$set": {name: getattr(updated_session, name) for name in updates}},
         )
 
-    result = await db.sessions.update_one(
-        {"_id": session_id_obj},
-        {"$set": { name : getattr(updated_session, name) for name in updates }}
-    )
-
-    if result.modified_count == 0:
+        if result.modified_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found or no changes made",
+            )
+    except HTTPException as h:
+        raise h
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found or no changes made"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id format"
         )
-
     return {"message": "Session updated successfully"}
 
-async def get_sessions_for_user(user_id: str | ObjectId, db: Database, skip : int = 0, limit : int | None= None) -> List[GameSession]:
+
+async def get_sessions_for_user(
+    user_id: ObjectId, db: Database, skip: int = 0, limit: int | None = None
+) -> List[GameSession]:
     """
     Get all game sessions for a specific user.
 
@@ -713,90 +707,79 @@ async def get_sessions_for_user(user_id: str | ObjectId, db: Database, skip : in
     """
     try:
 
-        user_id = to_object_id(user_id)
+        query = db.sessions.find(
+            {"user_id": user_id, "completed": True, "visible": True}
+        ).skip(skip=skip)
 
-    except InvalidId:
+        if limit is not None:
+            query = query.limit(limit=limit)
+
+        sessions_data = await query.to_list(length=None)
+
+        if not sessions_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="No history found"
+            )
+
+        response = [0] * len(sessions_data)
+        for i, session_data in enumerate(sessions_data):
+            response[i] = GameSession(**session_data)
+
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user_id format"
+            detail="Something happened on the server side",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    query = db.sessions.find({
-        "user_id": user_id,
-        "completed": True,
-        "visible" : True
-    }).skip(skip=skip)
-    
-    if limit is not None:
-        query = query.limit(limit=limit)
-        
-    sessions_data = await query.to_list(length=None)
-
-    if not sessions_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No history found"
-        )
-    
-
-    response = [0] * len(sessions_data)  
-    for i, session_data in enumerate(sessions_data):
-        session_data["id"] = session_data["_id"]
-        del session_data["_id"]
-        response[i] = GameSession(**session_data) 
-
     return response
+
 
 # =====================================================================
 
 # = Model ==============================================================
 
 
-async def get_models(db : Database) -> List[Model]:
-    models = await db.models.find({
-        "available" : True
-    }).to_list()
+async def get_models(db: Database) -> List[Model]:
+    models = await db.models.find({"available": True}).to_list()
 
     if models is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No available models found in the database"
+            detail="No available models found in the database",
         )
-    
 
     response = []
     for model in models:
         print(model)
-        model["id"] = model['_id']
-        del model['_id']
+        model["id"] = model["_id"]
+        del model["_id"]
         response.append(Model(**model))
     return response
 
-async def get_models_dependent_on_game(db : Database,
-                                       game : Game) -> List[Model]:
-     
-     # Build the query
+
+async def get_models_dependent_on_game(db: Database, game: Game) -> List[Model]:
+
+    # Build the query
     query = {"available": True}
     if game.metadata.game_rules.get("tools_enabled", False):
-        query["tools"] = True  
+        query["tools"] = True
 
     models = await db.models.find(query).to_list(None)
-    
+
     if models is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No available models found in the database"
+            detail="No available models found in the database",
         )
 
     response = []
     for model in models:
-        model["id"] = model['_id']
-        del model['_id']
+        model["id"] = model["_id"]
+        del model["_id"]
         response.append(Model(**model))
     return response
 
 
-async def get_random_model_id(db : Database, game : Game) -> ObjectId:
+async def get_random_model_id(db: Database, game: Game) -> ObjectId:
     """
     Fetch a random model ID from the Models collection.
 
@@ -806,36 +789,31 @@ async def get_random_model_id(db : Database, game : Game) -> ObjectId:
         str: The ID of the randomly selected model
     """
 
-    models : List[Model] = await get_models_dependent_on_game(db=db, 
-                                                              game=game)
+    models: List[Model] = await get_models_dependent_on_game(db=db, game=game)
 
     if not models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No models found in the database"
+            detail="No models found in the database",
         )
-    
 
     selected_model = random.choice(models)
 
     if (id := selected_model.id) is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Not a valid model"
+            detail="Not a valid model",
         )
     return id
 
 
-def get_model_client_from_provider(provider : str):
-    ...
 # =====================================================================
 
 
 # Judge ===============================================================
 
-async def get_judge_from_id(*, 
-                            db :Database,
-                            id : str | ObjectId) -> Judge:
+
+async def get_judge_from_id(*, db: Database, id: str | ObjectId) -> Judge:
     """
     Retrieves a Judge from the database by its unique ID.
 
@@ -850,16 +828,14 @@ async def get_judge_from_id(*,
         HTTPException: Raises 404 if no judge is found, 400 if the ID is invalid or another error occurs.
     """
     try:
-        response = await db.judges.find_one({
-            "_id" : ObjectId(id)
-        })
+        response = await db.judges.find_one({"_id": ObjectId(id)})
 
         if response is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Interupt there exist no judge with id: {id}"
+                detail=f"Interupt there exist no judge with id: {id}",
             )
-        
+
         response["_id"] = str(response["_id"])
 
         return Judge(**response)
@@ -867,17 +843,18 @@ async def get_judge_from_id(*,
     except InvalidId:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Interupt {id} is not a valid id."
+            detail=f"Interupt {id} is not a valid id.",
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Interupt {e}."
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Interupt {e}."
         )
+
 
 # =====================================================================
 
 # Leaderboard
+
 
 async def fetch_and_process_leaderboard_data(
     *,
@@ -887,257 +864,242 @@ async def fetch_and_process_leaderboard_data(
 ):
     try:
 
-
         # Time range for sessions
         time_range = {
             "$gte": last_snapshot,
-            "$lt":  current_snapshot,
+            "$lt": current_snapshot,
         }
 
         # Step 2: Aggregate session data
         pipeline = [
             {"$match": {"completed": True, "completed_time": time_range}},
-            {"$addFields": {
-                "target": {
-                    "$cond": {
-                        "if": {"$eq": ["$metadata.game_rules.deterministic", True]},
-                        "then": "$metadata.kwargs.target",
-                        "else": None
-                    }
-                },
-                "system_prompt": {
-                    "$cond": {
-                        "if": {
-                            "$and": [
-                                {"$ne": ["$metadata.models_config.system_prompt", None]},
-                                {"$ne": ["$metadata.models_config.system_prompt", ""]}
-                            ]
-                        },
-                        "then": "$metadata.models_config.system_prompt",
-                        "else": None
-                    }
-                }
-            }},
-            {"$lookup": {
-                "from": "models",
-                "localField": "agent_id",
-                "foreignField": "_id",
-                "as": "model_info"
-            }},
-            {"$unwind": {"path": "$model_info", "preserveNullAndEmptyArrays": True}},
-            {"$group": {
-                "_id": "$game_id",
-                "sessions": {
-                    "$push": {
-                        "session_id": {"$toString": "$_id"},
-                        "user_id": "$user_id",
-                        "outcome": "$outcome",
-                        "target": "$target",
-                        "system_prompt": "$system_prompt",
-                        "model": "$model_info._id"
-                    }
-                }
-            }},
             {
-                "$project": {
-                    "_id": 0,
-                    "game_id": "$_id",
-                    "sessions": 1
-            }}
+                "$addFields": {
+                    "target": {
+                        "$cond": {
+                            "if": {"$eq": ["$metadata.game_rules.deterministic", True]},
+                            "then": "$metadata.kwargs.target",
+                            "else": None,
+                        }
+                    },
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "models",
+                    "localField": "agent_id",
+                    "foreignField": "_id",
+                    "as": "model_info",
+                }
+            },
+            {"$unwind": {"path": "$model_info", "preserveNullAndEmptyArrays": True}},
+            {
+                "$group": {
+                    "_id": "$game_id",
+                    "sessions": {
+                        "$push": {
+                            "session_id": {"$toString": "$_id"},
+                            "user_id": "$user_id",
+                            "outcome": "$outcome",
+                            "target": "$target",
+                            "system_prompt": "$system_prompt",
+                            "model": "$model_info._id",
+                        }
+                    },
+                }
+            },
+            {"$project": {"_id": 0, "game_id": "$_id", "sessions": 1}},
         ]
-        sessions = await db.sessions.aggregate(pipeline=pipeline)\
-                                    .to_list(length=None)
-        
 
-        game_ids = [ s["game_id"] for s in sessions ]
+        sessions = await db.sessions.aggregate(pipeline=pipeline).to_list(length=None)
 
-        # Step 1: Fetch leaderboard data
-        leaderboards = await db.leaderboards.find({
-            "game_id" : { "$in" : game_ids } 
-        }).to_list(None)
+        game_ids = [s["game_id"] for s in sessions]
 
+        # Step 1: Fetch all leaderboard data
+        leaderboards = await db.leaderboards.find({}).to_list(None)
 
-        leaderboard = { l["game_id"] : l for l in leaderboards }
+        leaderboard = {l["game_id"]: l for l in leaderboards}
 
         if not leaderboards and len(leaderboards) == 0:
             yield None
-            return 
-        
+            return
 
         # NOTE: rename me to a better function name
-        def unique_objects(game : dict):
-            unique_users   = {user['user_id'] for user in game['sessions']}
-            unique_models  = {user['model']   for user in game['sessions']}
-            unique_targets = {user['target']  for user in game['sessions']}
+        def unique_objects(game: dict):
+            unique_users = {user["user_id"] for user in game["sessions"]}
+            unique_models = {user["model"] for user in game["sessions"]}
+            # target will not always exist
+            unique_targets = {
+                user["target"]
+                for user in game["sessions"]
+                if user.get("target", None) is not None
+            }
+
             return unique_users, unique_models, unique_targets
-        
-    
+
         for game in sessions:
             users, models, targets = unique_objects(game)
-            yield (list(targets), list(users), list(models), game, leaderboard[game["game_id"]])
+            yield (
+                list(targets),
+                list(users),
+                list(models),
+                game,
+                leaderboard[game["game_id"]],
+            )
 
     except Exception as e:
         logger.error(e)
         raise e
 
-# NOTE: Deprecate this when Abstract games 
-async def get_leaderboards(db : Database):
-    
+
+# NOTE: Deprecate this when Abstract games
+async def get_leaderboards(db: Database):
+
     try:
         leaderboards = await db.leaderboards.find({}).to_list(None)
         if leaderboards is None or len(leaderboards) == 0:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No leaderboard found"    
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"No leaderboard found"
             )
-        
+
         return leaderboards
     except HTTPException as h:
         raise h
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something occurred"
+            detail="Something occurred",
         )
 
 
-async def get_leaderboard_buffer(db : Database,
-                          game_id : ObjectId,
-                          query : str,
-                          skip: int = 0,
-                          limit: int = 0):
-    
-    skip = max(0, skip)
-    limit = max(0, limit)
+async def get_game_leaderboard(db: Database, game_id: ObjectId):
 
-   # Base pipeline
     pipeline = [
+        {"$match": {"game_id": game_id}},
+        {"$unwind": "$models"},
         {
-            "$match": {
-                "game_id": game_id
+            "$lookup": {
+                "from": "models",
+                "localField": "models.id",
+                "foreignField": "_id",
+                "as": "details",
             }
-        }
+        },
+        {"$unwind": "$details"},
+        {
+            "$group": {
+                "_id": "$_id",
+                "game_id": {"$first": "$game_id"},
+                "last_snapshot": {"$first": "$last_snapshot"},
+                "targets": {"$first": "$targets"},
+                "models": {
+                    "$addToSet": {
+                        "id": {"$toString": "$models.id"},
+                        "elo": "$models.elo",
+                        "delta": "$models.delta",
+                        "name": "$details.name",
+                        "image": "$details.image",
+                    }
+                },
+            }
+        },
+        {
+            "$set": {
+                "models": {
+                    "$cond": {
+                        "if": {"$ne": ["$models", None]},
+                        "then": {
+                            "$cond": {
+                                "if": {"$gt": [{"$size": "$models"}, 0]},
+                                "then": {
+                                    "$sortArray": {
+                                        "input": "$models",
+                                        "sortBy": {"elo": -1},
+                                    }
+                                },
+                                "else": "$models",
+                            }
+                        },
+                        "else": [],
+                    }
+                },
+                "targets": {"$ifNull": ["$targets", []]},
+            }
+        },
+        {
+            "$lookup": {
+                "from": "leaderboards",
+                "let": {"game_id": "$game_id"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$game_id", "$$game_id"]}}},
+                    {"$unwind": "$players"},
+                    {
+                        "$lookup": {
+                            "from": "users",
+                            "localField": "players.id",
+                            "foreignField": "_id",
+                            "as": "users",
+                        }
+                    },
+                    {"$unwind": "$users"},
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "id": {"$toString": "$players.id"},
+                            "elo": "$players.elo",
+                            "delta": "$players.delta",
+                            "username": "$users.username",
+                        }
+                    },
+                    {"$sort": {"elo": -1}},
+                ],
+                "as": "players",
+            }
+        },
+        {
+            "$set": {
+                "targets": {
+                    "$cond": {
+                        "if": {"$ne": ["$targets", None]},
+                        "then": {
+                            "$cond": {
+                                "if": {"$gt": [{"$size": "$targets"}, 0]},
+                                "then": {
+                                    "$sortArray": {
+                                        "input": "$targets",
+                                        "sortBy": {"elo": -1},
+                                    }
+                                },
+                                "else": "$targets",
+                            }
+                        },
+                        "else": [],
+                    }
+                }
+            }
+        },
+        {
+            "$project": {
+                "_id": {"$toString": "$_id"},
+                "game_id": {"$toString": "$game_id"},
+                "last_snapshot": 1,
+                "players": 1,
+                "models": 1,
+                "targets": 1,
+            }
+        },
     ]
-
-    if query == "users":
-        pipeline += [
-            {
-                "$unwind": "$players"
-            },
-            {
-                "$lookup": {
-                    "from": "users",
-                    "localField": "players.id",
-                    "foreignField": "_id",
-                    "as": "user_details"
-                }
-            },
-            {
-                "$unwind": "$user_details"
-            },
-            {
-                "$project": {
-                    "id": { "$toString": "$players.id" },
-                    "elo": "$players.elo",
-                    "delta": "$players.delta",
-                    "username": "$user_details.username"
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$_id",
-                    "players": { "$push": "$$ROOT" }
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "players": { "$slice": ["$players", skip, limit] }
-                }
-            }
-        ]
-    elif query == "models":
-        pipeline += [
-            {
-                "$unwind": "$models"
-            },
-            {
-                "$lookup": {
-                    "from": "models",
-                    "localField": "models.id",
-                    "foreignField": "_id",
-                    "as": "model_details"
-                }
-            },
-            {
-                "$unwind": "$model_details"
-            },
-            {
-                "$project": {
-                    "id": { "$toString": "$models.id" },
-                    "elo": "$models.elo",
-                    "delta": "$models.delta",
-                    "name": "$model_details.name",
-                    "image": "$model_details.image"
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$_id",
-                    "models": { "$push": "$$ROOT" }
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "models": { "$slice": ["$models", skip, limit] }
-                }
-            }
-        ]
-    elif query == "targets":
-        pipeline += [
-            {
-                "$unwind": "$targets"
-            },
-            {
-                "$project": {
-                    "id": { "$toString": "$targets.id" },
-                    "elo": "$targets.elo",
-                    "delta": "$targets.delta"
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$_id",
-                    "targets": { "$push": "$$ROOT" }
-                }
-            },
-            {
-                "$sort" : { "targets.elo" : -1 }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "targets": { "$slice": ["$targets", skip, limit] }
-                }
-            }
-        ]
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{query} is not a valid query."
-        )
 
     try:
         leaderboard = await db.leaderboards.aggregate(pipeline).to_list(length=1)
-
-        if not leaderboard:
+        print(leaderboard)
+        if not leaderboard or len(leaderboard) == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No leaderboard found under {str(game_id)}"
+                detail=f"No leaderboard found under {str(game_id)}",
             )
 
-        return leaderboard[0]  # Return the first (and only) result
+        return leaderboard.pop(0)  # Return the first (and only) result
 
     except HTTPException as http_exc:
         raise http_exc
@@ -1145,122 +1107,7 @@ async def get_leaderboard_buffer(db : Database,
         logger.error(f"Error retrieving leaderboard buffer: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something on the server end could not complete this call"
-        )
-
-
-# NOTE DEPRECATED this function will soon be deprecated 
-#      due to it's use when 
-async def get_leaderboard_from_game_id(game_id: ObjectId, 
-                                       db: Database,
-                                       skip: int = 0,
-                                       limit: int = 0) -> dict:
-    """Get leaderboard latest snapshot from MongoDB"""
-    try:
-        # Ensure skip and limit values are valid
-        skip = max(0, skip)
-        limit = max(0, limit)
-
-        pipeline = [
-            { 
-                "$match": { 
-                    "game_id": game_id 
-                }
-            },
-            # Process models
-            {
-                "$unwind": "$models"  # Deconstruct the models array
-            },
-            {
-                "$lookup": {
-                    "from": "models",  # Collection to join with
-                    "localField": "models.id",  # Field in models to match with the joined collection
-                    "foreignField": "_id",  # Field in the joined collection to match
-                    "as": "model_details"  # Name for the joined data
-                }
-            },
-            {
-                "$unwind": "$model_details"  # Flatten the model_details array
-            },
-            {
-                "$group": {
-                    "_id": "$_id",
-                    "game_id": { "$first": "$game_id" },
-                    "last_snapshot": { "$first": "$last_snapshot" },
-                    "mean": { "$first": "$mean" },
-                    "targets" : { "$first": "$targets" },
-                    "models": {
-                        "$addToSet": {
-                            "id": { "$toString": "$models.id" },
-                            "elo" : "$models.elo",
-                            "delta" : "$models.delta",
-                            "name": "$model_details.name",
-                            "image": "$model_details.image"
-                        }
-                    }
-                }
-            },
-            # Process players
-            {
-                "$lookup": {
-                    "from": "leaderboards",
-                    "let": { "game_id": "$game_id" },
-                    "pipeline": [
-                        { "$match": { "$expr": { "$eq": ["$game_id", "$$game_id"] } } },
-                        { "$unwind": "$players" },
-                        {
-                            "$lookup": {
-                                "from": "users",
-                                "localField": "players.id",
-                                "foreignField": "_id",
-                                "as": "user_details"
-                            }
-                        },
-                        { "$unwind": "$user_details" },
-                        {
-                            "$project": {
-                                "id": { "$toString": "$players.id" },
-                                "elo": "$players.elo",
-                                "delta": "$players.delta",
-                                "username": "$user_details.username"
-                            }
-                        }
-                    ],
-                    "as": "players"
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "id": { "$toString": "$_id" },
-                    "game_id": { "$toString": "$game_id" },
-                    "last_snapshot": 1,
-                    "mean": 1,
-                    "players": { "$slice": ["$players", skip, limit] },
-                    "models" : { "$slice": ["$models",  skip, limit] },
-                    "targets": { "$slice": ["$targets", skip, limit] },
-                }
-            }
-        ]
-
-
-        leaderboard = await db.leaderboards.aggregate(pipeline).to_list(length=1)
-
-        if not leaderboard:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No leaderboard found under {str(game_id)}"
-            )
-
-        return leaderboard[0]  # Return the first (and only) result
-
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as exc:
-        logger.error(f"Error retrieving leaderboard: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something on the server end could not complete this call"
+            detail="Something on the server end could not complete this call",
         )
 
 
@@ -1271,13 +1118,11 @@ async def get_leaderboard_from_game_id(game_id: ObjectId,
 # 3. take time snapshot
 # 4. set users elo to 0 prepare for new elo
 # 5. use linear regression model to define new elo
-# 
-     
+#
+
 
 # Leaderboard state
 # id
 # game_id one to one relationship
 # last_snapshot
 # players: object holds { username : str, beta : float64 }
-
-    
