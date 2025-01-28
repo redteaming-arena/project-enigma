@@ -1,12 +1,18 @@
 "use client";
-import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import React, {
+  ChangeEvent,
+  KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useUser } from "@/context/user";
 import { useNotification } from "../toast";
 import {
   createTitle,
   concludeSessionGame,
   GameSessionPublicResponse,
-  startGame
+  startGame,
 } from "@/service/session";
 import { Message as MessageComponent } from "./message";
 import { ScrollArea } from "../ui/scroll-area";
@@ -66,12 +72,12 @@ export const SharedConversation = ({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-screen mx-auto relative w-full max-w-3xl">
+      <div className="flex flex-col h-screen mx-auto relative w-full">
         {/* Top gradient */}
         <div className="absolute top-0 w-full bg-gradient-to-t from-transparent to-zinc-950 z-10 rounded-b-xl h-[50px]" />
 
         {/* Model info header */}
-        <div className="absolute top-4 right-4 flex items-center space-x-3 z-20">
+        <div className="fixed top-4 right-4 flex items-center space-x-3 z-20">
           {modelName && modelImage && (
             <div className="flex items-center space-x-2">
               <img
@@ -96,7 +102,7 @@ export const SharedConversation = ({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{outcome === "win" ? "Jailbroken" : "Unbroken"}</p>
+                {outcome === "win" ? "Jailbroken" : "Unbroken"}
               </TooltipContent>
             </Tooltip>
           )}
@@ -113,15 +119,13 @@ export const SharedConversation = ({
                 <Target className="h-4 w-4 text-zinc-200" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              <p>Objective</p>
-            </TooltipContent>
+            <TooltipContent>Objective</TooltipContent>
           </Tooltip>
         </div>
 
         {/* Messages area */}
         <ScrollArea className="flex-1 w-full">
-          <div className="relative flex-1 overflow-hidden mt-2 mx-auto p-6 pt-8">
+          <div className="relative flex-1 overflow-hidden mt-2 mx-auto p-6 pt-8 w-full max-w-4xl">
             {history.length === 0 ? (
               <div className="text-center text-gray-500 py-8">
                 No messages yet
@@ -136,7 +140,7 @@ export const SharedConversation = ({
                   >
                     {message.role === "user" && (
                       <MessageComponent.Avatar
-                        className="mt-[.65rem] ml-[.30rem]"
+                        className="mt-[.8rem] ml-[.30rem]"
                         src={undefined}
                         fallback={username ? username[0] : "U"}
                       />
@@ -163,7 +167,7 @@ export const SharedConversation = ({
           }}
         >
           <DialogContent
-            className="sm:max-w-[1024px]"
+            className="sm:min-w-[500px]"
             // Prevent closing by clicking outside
             onPointerDownOutside={(e) => e.preventDefault()}
             // Prevent closing by pressing escape
@@ -171,12 +175,22 @@ export const SharedConversation = ({
           >
             <DialogHeader className="text-center">
               <DialogTitle>Game Objective</DialogTitle>
-              <DialogDescription style={{ whiteSpace: "pre-line" }}>
-                <br className="mb-4" />
-                <span className=" font-bold text-white mt-3">
-                  Objective
-                </span>: {description}
-              </DialogDescription>
+              <ScrollArea className="max-h-[500px] overflow-scroll ">
+                <DialogDescription>
+                  <br className="mb-4" />
+                  <span className=" font-bold text-white mt-3">
+                    Objective
+                  </span>:{" "}
+                  <p className="whitespace-pre-wrap text-base leading-relaxed">
+                    {(description ??
+                      "")
+                        .split("\\n")
+                        .map((line, index) => (
+                          <React.Fragment key={index}>{line}</React.Fragment>
+                        ))}
+                  </p>
+                </DialogDescription>
+              </ScrollArea>
             </DialogHeader>
             <DialogFooter>
               <Button
@@ -201,32 +215,33 @@ export const ChatComponent = ({
   session,
   authorization,
 }: ChatComponentProps) => {
-  const router = useRouter();
-  const {
-    state: user,
-    isLoading: isUserLoading,
-    handleSessionPush,
-  } = useUser();
   // State
-  console.log(!session.completed && session.start_time !== null,  session.start_time !== null, !session.completed, session.start_time)
-
   // session is not completed, or if the time has not started
-  console.log(session.completed ? false : session.start_time === null)
-  const [showTargetModal, setShowTargetModal] = useState(session.completed ? false : session.start_time === null);
+  const [started, setStarted] = useState(session.start_time !== null);
+  const [showTargetModal, setShowTargetModal] = useState(
+    session.completed ? false : session.start_time === null
+  );
+
   const [loadingTargetModal, setLoadingTargetModal] = useState<boolean>(false);
   const [hasText, setHasText] = useState(false);
-  const [outcome, setOutcome] = useState<null | "win" | "loss">(
-    null
-  );
+  const [outcome, setOutcome] = useState<null | "win" | "loss">(null);
 
   // Ref
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Hook
+  const router = useRouter();
   const { isMobile } = useSidebar();
   const notification = useNotification();
-  const { seconds, isComplete, start, pause, formatTime } = useTimer(session.metadata?.game_rules.time_limit ?? 10);
+  const { seconds, isComplete, start, pause, formatTime } = useTimer(
+    session.metadata?.game_rules.time_limit ?? 10
+  );
+  const {
+    state: user,
+    isLoading: isUserLoading,
+    handleSessionPush,
+  } = useUser();
 
   const {
     messages,
@@ -236,7 +251,7 @@ export const ChatComponent = ({
     stop,
     isLoading,
   } = useChat({
-    api: `/api/${session.id}/chat_conversation/${user.id}/conversation`,
+    api: `/api/${session._id}/chat_conversation/${user.id}/conversation`,
     headers: {
       Authorization: `Bearer ${authorization}`,
     },
@@ -260,7 +275,9 @@ export const ChatComponent = ({
 
       notification.showSuccess("Stream started");
 
-      let reader;
+      let reader: any;
+      const TIMEOUT_MS = 30000; // 30 seconds timeout
+      let timeoutId: any = null;
       try {
         reader = response.body?.getReader();
         if (!reader) return;
@@ -268,66 +285,89 @@ export const ChatComponent = ({
         const decoder = new TextDecoder();
         let buffer = "";
 
-        // indicate to the user the session is running
-        setMessages((prevMessages: any) => {
-          return [...prevMessages, { role: "assistant", content: "" }];
+        // Set up the timeout
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Stream timeout exceeded"));
+          }, TIMEOUT_MS);
         });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        // Combine the reader and timeout logic
+        const readStream = async () => {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          // Decode and append the chunk to the buffer
-          buffer += decoder.decode(value, { stream: true });
-          console.log(buffer);
-          const lines = buffer.split("\n");
-          let content = "";
-
-          // Process all complete lines
-          for (let i = 0; i < lines.length - 1; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            try {
-              const chunk = JSON.parse(line);
-
-              switch (chunk.event) {
-                case "message":
-                  content = content + chunk.content;
-                  handleNewMessage(chunk.content);
-
-                  break;
-
-                case "error":
-                  notification.showError(chunk.message);
-                  break;
-
-                case "end":
-                  if (chunk.outcome === "win") {
-                    pause();
-                    const message =
-                      messages.length === 0 ? [ { content : chunk.content ?? "<empty>" }, { content }] : messages;
-                    await handleSessionEnd(message, "win");
-                  }
-                  break;
-
-                default:
-                  console.warn("Unhandled event type:", chunk.event);
-              }
-            } catch (e) {
-              console.error("Error parsing chunk:", line, e);
+            // Cancel the timeout once streaming begins
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null; // Ensure it doesn't fire later
             }
-          }
 
-          // Keep the last incomplete line in the buffer
-          buffer = lines[lines.length - 1];
-        }
+            // Decode and append the chunk to the buffer
+            buffer += decoder.decode(value, { stream: true });
+            console.log(buffer);
+            const lines = buffer.split("\n");
+            let content = "";
+
+            // Process all complete lines
+            for (let i = 0; i < lines.length - 1; i++) {
+              const line = lines[i].trim();
+              if (!line) continue;
+
+              try {
+                const chunk = JSON.parse(line);
+
+                switch (chunk.event) {
+                  case "message":
+                    content += chunk.content;
+                    handleNewMessage(chunk.content);
+                    break;
+
+                  case "error":
+                    notification.showError(chunk.message);
+                    break;
+
+                  case "end":
+                    if (chunk.outcome === "win") {
+                      pause();
+                      const message =
+                        messages.length === 0
+                          ? [
+                              { content: chunk.content ?? "<empty>" },
+                              { content },
+                            ]
+                          : messages;
+                      await handleSessionEnd(message, "win");
+                    }
+                    break;
+
+                  default:
+                    console.warn("Unhandled event type:", chunk.event);
+                }
+              } catch (e) {
+                console.error("Error parsing chunk:", line, e);
+              }
+            }
+
+            // Keep the last incomplete line in the buffer
+            buffer = lines[lines.length - 1];
+          }
+        };
+
+        // Race the timeout against the stream reading
+        await Promise.race([readStream(), timeoutPromise]);
 
         // Process any remaining buffer content
         processRemainingBuffer(buffer);
       } catch (error) {
-        console.warn(error);
+        if ((error as any).message === "Stream timeout exceeded") {
+          notification.showError("The server took too long to respond.");
+        } else {
+          console.warn(error);
+        }
       } finally {
+        if (timeoutId) clearTimeout(timeoutId); // Ensure no stray timeout
         if (reader) reader.releaseLock();
       }
     },
@@ -356,20 +396,21 @@ export const ChatComponent = ({
     });
   };
 
-  const handleSessionEnd = async (messages: Message[] | { content : string }[], outcome: string) => {
-    if (!session.id || !user.id) {
+  const handleSessionEnd = async (
+    messages: Message[] | { content: string }[],
+    outcome: string
+  ) => {
+    if (!session._id || !user.id) {
       notification.showError("Authorization Error Occurred");
       router.push("/");
       return;
     }
-    console.log(messages, outcome)
 
     try {
-
       // Handle game outcome
       if (outcome === "loss" && session.outcome == null) {
         const endResponse = await concludeSessionGame(
-          session.id,
+          session._id,
           user.id,
           outcome,
           messages as Message[]
@@ -382,7 +423,7 @@ export const ChatComponent = ({
       let title = "";
       if (messages.length >= 2) {
         // Construct message content for title
-        const response = await createTitle(session.id, user.id, true);
+        const response = await createTitle(session._id, user.id, true);
         if (!response.ok) {
           throw new Error(
             `Failed to create session title: ${response.message}`
@@ -393,23 +434,18 @@ export const ChatComponent = ({
         title = response.data;
       } else {
         // Handle empty or single message case
-        const response = await createTitle(
-          session.id,
-          user.id,
-          false
-        );
+        const response = await createTitle(session._id, user.id, false);
         if (!response.ok) {
           throw new Error(
             `Failed to create empty session title: ${response.message}`
           );
         }
         notification.showWarning("No content within session");
-        title = response.data ?? "Untitled Game"
+        title = response.data ?? "Untitled Game";
       }
 
       // push the page
-      if (messages.length > 1)
-        handleSessionPush({ title, _id: session.id });
+      if (messages.length > 1) handleSessionPush({ title, _id: session._id });
       router.refresh();
     } catch (error) {
       notification.showError(`Error: ${(error as Error).message}`);
@@ -430,12 +466,11 @@ export const ChatComponent = ({
     }
   };
 
-
   useEffect(() => {
-    if(!session.ok){
-      router.push("/")
+    if (!session.ok) {
+      router.push("/");
     }
-  }, [])
+  }, []);
 
   // show model targe if the session at the start of the game
   useEffect(() => {
@@ -443,8 +478,8 @@ export const ChatComponent = ({
     if (!session.completed && session.description) {
       // Show the target modal
       setShowTargetModal(session.start_time === null);
-      if (session.start_time !== null){
-        start()
+      if (session.start_time !== null) {
+        start();
       }
     }
   }, [session.description, setShowTargetModal]);
@@ -489,13 +524,12 @@ export const ChatComponent = ({
     }
   };
 
-  // on
   useEffect(() => {
     if (outcome === "loss" && !session.completed) {
       pause(); // Pause timer to indicate the end of the game
-      handleSessionEnd(messages, "loss")
+      handleSessionEnd(messages, "loss");
     }
-  }, [outcome, session.id, user.id]);
+  }, [outcome, session._id, user.id]);
 
   // Loss Case 1: where timer runs out
   useEffect(() => {
@@ -515,52 +549,6 @@ export const ChatComponent = ({
     }
   }, [session, textareaRef]);
 
-  // NOTE: uncomment when fix loss
-  // Replace your existing useEffect forfeit logic with this:
-  useEffect(() => {
-    // State to track the forfeit status
-    const forfeitState = {
-      shouldForfeit: false,
-      isForfeitInProgress: false,
-    };
-
-    // Function to handle forfeiting the game
-
-    // Listener for the `beforeunload` event (warn user before leaving)
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!session.completed && outcome === null && !isComplete) {
-        console.log("user leaving");
-        forfeitState.shouldForfeit = true; // Mark forfeit as required
-        event.returnValue = ""; // Trigger browser's default confirmation dialog
-      }
-    };
-
-    // Listener for the `unload` event (ensure API call on page exit)
-    const handleUnload = async (event: any) => {
-      if (session.id && user.id) {
-        // await concludeSessionGame(session.id, user.id, "forfeit");
-        console.log("finished");
-      }
-    };
-
-    // Add event listeners
-    // document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    if (!session.completed && !isComplete) {
-      window.addEventListener("beforeunload", handleBeforeUnload);
-      window.addEventListener("unload", handleUnload);
-    }
-
-    // Cleanup event listeners on component unmount
-    return () => {
-      // document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (isComplete) {
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        window.removeEventListener("unload", handleUnload);
-      }
-    };
-  }, [session.id, user.id, outcome, session.completed, isComplete]);
-
   if (isUserLoading || !session.ok) {
     return (
       <Loading
@@ -572,7 +560,7 @@ export const ChatComponent = ({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-screen mx-auto relative w-full max-w-4xl">
+      <div className="flex flex-col h-screen mx-auto relative w-full ">
         {/* Messages Container */}
         <div
           className={cn(
@@ -582,7 +570,7 @@ export const ChatComponent = ({
         />
 
         {/* Model info for completed session */}
-        <div className="absolute top-4 right-4 flex items-center space-x-3 z-20">
+        <div className="fixed top-4 right-4 flex items-center space-x-3 z-20">
           {!session.completed && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -597,9 +585,7 @@ export const ChatComponent = ({
                   </span>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>
-                <p>Time remaining</p>
-              </TooltipContent>
+              <TooltipContent>Time remaining</TooltipContent>
             </Tooltip>
           )}
           {session.completed && (
@@ -616,23 +602,23 @@ export const ChatComponent = ({
               </div>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="px-2 py-1 rounded-lg bg-zinc-800/50 border border-zinc-700/50 text-zinc-200 text-sm select-none">
+                  <div className=" p-1 rounded-lg bg-zinc-800/50 border border-zinc-700/50 text-zinc-200 text-sm select-none">
                     {session.outcome === "win" ? (
-                      <Unlock className="text-green-400 h-4 w-4" />
+                      <Unlock className="text-green-400 h-5 w-5" />
                     ) : (
-                      <Lock className="text-red-400 h-4 w-4" />
+                      <Lock className="text-red-400 h-5 w-5" />
                     )}
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>{session.outcome === "win" ? "Jailbroken" : "Unbroken"}</p>
+                  {session.outcome === "win" ? "Jailbroken" : "Unbroken"}
                 </TooltipContent>
               </Tooltip>
               {session.history?.length !== 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <ShareDialog
-                      session_id={session.id}
+                      session_id={session._id}
                       share_id={session.shared ?? undefined}
                     >
                       <Button
@@ -644,37 +630,33 @@ export const ChatComponent = ({
                       </Button>
                     </ShareDialog>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Share conversation</p>
-                  </TooltipContent>
+                  <TooltipContent>Share conversation</TooltipContent>
                 </Tooltip>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-xl bg-zinc-800/50 border border-zinc-700/50 hover:bg-zinc-700/50"
-                    onClick={() => {
-                      setShowTargetModal(true);
-                    }}
-                  >
-                    <Target className="h-4 w-4 text-zinc-200" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Objective</p>
-                </TooltipContent>
-              </Tooltip>
             </>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-xl bg-zinc-800/50 border border-zinc-700/50 hover:bg-zinc-700/50"
+                onClick={() => {
+                  setShowTargetModal(true);
+                }}
+              >
+                <Target className="h-4 w-4 text-zinc-200" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Objective</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Chat Area */}
         <ScrollArea className="flex-1 w-full">
           <div
             className={cn(
-              "relative flex-1 overflow-hidden mt-2 mx-auto p-6",
+              "relative flex-1 overflow-hidden mt-10 mx-auto p-6",
               session.completed ? "pt-8" : "pt-12",
               isMobile && "pt-14"
             )}
@@ -691,7 +673,7 @@ export const ChatComponent = ({
             ) : (
               <>
                 <div
-                  className="flex flex-col space-y-4 px-2 sm:px-4 pb-4 overflow-auto max-w-full"
+                  className="flex flex-col space-y-4 px-2 sm:px-4 pb-4 overflow-auto max-w-4xl mx-auto"
                   ref={scrollAreaRef}
                 >
                   {messages.map((message, idx) =>
@@ -724,7 +706,9 @@ export const ChatComponent = ({
                         key={`${message.role}-message-${idx}`}
                         className=" italic text-lg mt-5"
                       >
-                        <span className="animate-pulse">Thinking...</span>
+                        {!session.completed && (
+                          <span className="animate-pulse">Thinking...</span>
+                        )}
                       </div>
                     )
                   )}
@@ -742,7 +726,7 @@ export const ChatComponent = ({
 
         {/* Input Container */}
         {!session.completed && (
-          <div className="w-full relative z-10">
+          <div className="w-full relative z-10 max-w-4xl mx-auto">
             <Card
               className="border-zinc-700/50 flex flex-col gap-1.5 pl-4 pt-2.5 pr-2.5 pb-2.5 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.075)] hover:border-zinc-600 focus-within:border-zinc-600 cursor-text z-10 rounded-t-2xl rounded-b-none border-b-0"
               title={
@@ -846,7 +830,7 @@ export const ChatComponent = ({
         }}
       >
         <DialogContent
-          className="sm:max-w-[425px]"
+          className="sm:max-w-[500px]"
           // Prevent closing by clicking outside
           onPointerDownOutside={(e) => e.preventDefault()}
           // Prevent closing by pressing escape
@@ -854,14 +838,23 @@ export const ChatComponent = ({
         >
           <DialogHeader className="text-center">
             <DialogTitle>Game Objective</DialogTitle>
-            <DialogDescription>
-              Get ready to challenge your skills! Dive into this session where
-              every move counts.
-              <br className="mb-4" />
-              <span className=" font-bold text-white mt-3">
-                Objective
-              </span>: {session.description}
-            </DialogDescription>
+            <ScrollArea className="max-h-[500px] overflow-scroll ">
+              <DialogDescription>
+                Get ready to challenge your skills! Dive into this session where
+                every move counts.
+                <br className="mb-4" />
+                <span className=" font-bold text-white mt-3">
+                  Objective
+                </span>: <span className="whitespace-pre-wrap leading-relaxed">
+                    {(session.description ??
+                      "")
+                        .split("\\n")
+                        .map((line, index) => (
+                          <React.Fragment key={index}>{line}</React.Fragment>
+                        ))}
+                  </span>
+              </DialogDescription>
+            </ScrollArea>
           </DialogHeader>
           <DialogFooter>
             <Button
@@ -871,26 +864,25 @@ export const ChatComponent = ({
                 if (textareaRef.current) {
                   textareaRef.current.focus();
                 }
-                if (session.id && user.id){
-                  setLoadingTargetModal(true)
-                  const response = await startGame(session.id, user.id)
-                  if (!response.ok){
-                    notification.showError("Could not start sessions")
-                    router.push("/")
+                if (!started && !session.completed && session._id && user.id) {
+                  setLoadingTargetModal(true);
+                  const response = await startGame(session._id, user.id);
+                  if (!response.ok) {
+                    notification.showError("Could not start sessions");
+                    router.push("/");
                   }
                   // if session is not completed we don't need to start
                   if (!session.completed) {
                     start(); // the timer
                   }
-                } else {
-                  router.push("/")
+                  setStarted(true);
                 }
-                setLoadingTargetModal(false)
+                setLoadingTargetModal(false);
                 setShowTargetModal(false);
               }}
             >
-              {loadingTargetModal && <Loading/>}
-              {session.completed ? "Close" : "Start Cracking"}
+              {loadingTargetModal && <Loading />}
+              {session.completed || started ? "Close" : "Start Cracking"}
             </Button>
           </DialogFooter>
         </DialogContent>

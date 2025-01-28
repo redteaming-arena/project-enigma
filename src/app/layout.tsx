@@ -74,7 +74,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#010104]`}
       >
         <SidebarProvider>
           <UserProvider>

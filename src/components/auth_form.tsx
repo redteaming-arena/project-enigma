@@ -75,11 +75,13 @@ export const AuthForms = ({
       } else {
         notification.showSuccess("Successfully Logged In");
         const user = await getUser();
+        console.warn("User logged in to website")
+        console.log("loging ", user)
         dispatch({
           type : "SET_USER",
           payload : {
-            id : user.id ?? null, 
-            username : user.username ?? null,
+            id : user._id ?? undefined, 
+            username : user.username ?? undefined,
             history : user.history ?? [],
             pinned : user.pinned ?? []
           }

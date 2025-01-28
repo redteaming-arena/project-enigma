@@ -2,49 +2,23 @@
 import Loading from "@/components/loading";
 import { SearchComponent } from "@/components/searchbar";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useUser } from "@/context/user";
 import { cn } from "@/lib/utils";
-import {
-  GameSessionRecentItem,
-  GameSessionRecentItemResponse,
-  getRecents,
-} from "@/service/session";
 import { ScrollArea } from "@radix-ui/react-scroll-area";
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 
 export default function Recent() {
-  const router = useRouter();
-  const { isLoading, handlePopSessions } = useUser();
-  const [loading, setLoading] = useState<boolean>(true);
+  const { state : user , isLoading, handlePopSessions } = useUser();
   const [select, setSelect] = useState<boolean>(false);
   const [selectedChats, setSelectedChats] = useState<string[]>([]);
-  const [history, setHistory] = useState<GameSessionRecentItem[]>([]);
   const [query, setQuery] = useState<string>("");
 
-  const handleHistory = useCallback(async () => {
-    const recent: GameSessionRecentItemResponse = await getRecents(
-      0,
-      undefined
-    );
 
-    if (recent.ok) {
-      setHistory(recent.content ?? []);
-      setLoading(false);
-    } else {
-      router.push("/");
-    }
-  }, [setHistory, setLoading, router]);
-
-  useEffect(() => {
-    handleHistory()
-  }, [])
-
-  if (loading || isLoading) {
+  if (isLoading) {
     return (
       <Loading
         fullScreen
@@ -69,7 +43,7 @@ export default function Recent() {
 
       {!select && selectedChats.length === 0 ? (
         <p className="mt-2 text-center md:text-lg text-md font-medium text-gray-200">
-          You have {history.length} previous chats within RedArena{" "}
+          You have {user.history.length} previous chats within RedArena{" "}
           <span
             onClick={() => {
               setSelect(true);
@@ -95,7 +69,7 @@ export default function Recent() {
             {selectedChats.length !== history.length && (
               <button
                 onClick={() => {
-                  setSelectedChats(history.map((item: any) => item.session_id));
+                  setSelectedChats(user.history.map((item: any) => item._id));
                 }}
                 className="text-sm text-primary hover:underline"
               >
@@ -117,12 +91,6 @@ export default function Recent() {
               onClick={async () => {
                 const successfully = await handlePopSessions(selectedChats);
                 if (successfully) {
-                  setHistory((prevHistory) =>
-                    prevHistory.filter(
-                      (hst: GameSessionRecentItem) =>
-                        !selectedChats.includes(hst.session_id ?? "")
-                    )
-                  );
                   setSelect(false);
                   setSelectedChats([]);
                 }
@@ -138,40 +106,40 @@ export default function Recent() {
       {/* History List */}
       <div className="mt-4 space-y-5">
         <ScrollArea className="space-y-5">
-          {history.map((item) => {
+          {user.history.map((item) => {
+            console.log(item.title)
+            console.log(item._id)
+
             if (
               (query.length === 0 || item.title?.includes(query)) &&
-              item.session_id
+              item._id
             ) {
               return (
                 <div
-                  key={item.session_id}
+                  key={item._id}
                   className="group flex items-center space-x-3 relative"
                 >
                   {/* Checkbox */}
                   <Checkbox
-                    id={`${item.session_id}`}
-                    checked={selectedChats.includes(item.session_id)}
-                    onClick={() => toggleSelection(item.session_id ?? "")}
+                    id={`${item._id}`}
+                    checked={selectedChats.includes(item._id)}
+                    onClick={() => toggleSelection(item._id ?? "")}
                     className={cn(
                       "form-checkbox h-7 w-7 text-primary absolute transition-opacity duration-200",
-                      !select && !selectedChats.includes(item.session_id)
+                      !select && !selectedChats.includes(item._id)
                         ? "opacity-0 group-hover:opacity-100"
                         : "opacity-100"
                     )}
                   />
 
                   {/* Chat Item */}
-                  <Link href={`/c/${item.session_id}`} className="w-full">
+                  <Link href={`/c/${item._id}`} className="w-full">
                     <Card className="p-3 bg-card rounded-lg shadow-md hover:shadow-lg transition-shadow hover:border-gray-500 duration-300">
                       <CardContent>
                         <div className="text-lg font-semibold text-primary">
                           {item.title}
                         </div>
                       </CardContent>
-                      <CardFooter className="-mb-5">
-                        Last message 1 day ago
-                      </CardFooter>
                     </Card>
                   </Link>
                 </div>

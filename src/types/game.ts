@@ -23,7 +23,7 @@ interface Metadata {
   
   // Main interface for game data
 interface GameData {
-    id: string;
+    _id: string;
     title: string;
     author?: string[];
     description?: string;

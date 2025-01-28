@@ -13,20 +13,20 @@ import { deleteSession } from "@/service/session";
 
 // Types
 interface UserState {
-  id: string | null;
-  username: string | null;
+  id?: string;
+  username?: string;
   history: { _id: string; title: string }[];
   pinned: any[];
 }
 
 type UserAction =
-  | { type: "SET_USER"; payload: UserState }
-  | { type: "PIN_GAME"; payload: { id: string; image: string; title: string } }
-  | { type: "UNPIN_GAME"; payload: { id: string } }
+  | { type: "SET_USER"; payload: { id? : string; username? : string; history : any[]; pinned : any[] } }
+  | { type: "PIN_GAME"; payload: { _id: string; image: string; title: string } }
+  | { type: "UNPIN_GAME"; payload: { _id: string } }
   | { type: "PUSH_SESSION"; payload: { _id: string; title: string } }
   | { type: "POP_SESSION"; payload: { _id: string } }
   | { type: "POP_SESSIONS"; payload: string[] }
-  | { type: "UPDATE_USERNAME"; payload: string | null }
+  | { type: "UPDATE_USERNAME"; payload?: string }
   | { type: "UPDATE_IMAGE"; payload: string | null }
   | { type: "CLEAR_USER" };
 
@@ -45,8 +45,8 @@ interface UserContextType {
 
 // Initial State
 const initialState: UserState = {
-  id: null,
-  username: null,
+  id: undefined,
+  username: undefined,
   pinned: [],
   history: [],
 };
@@ -55,7 +55,7 @@ const initialState: UserState = {
 function userReducer(state: UserState, action: UserAction): UserState {
   switch (action.type) {
     case "SET_USER":
-      return { ...action.payload };
+      return {  ...action.payload };
     case "PUSH_SESSION":
       return {
         ...state,
@@ -89,7 +89,7 @@ function userReducer(state: UserState, action: UserAction): UserState {
     case "UNPIN_GAME":
       return {
         ...state,
-        pinned: state.pinned.filter((item) => item.id !== action.payload.id),
+        pinned: state.pinned.filter((item) => item._id !== action.payload._id),
       };
     default:
       return state;
@@ -114,8 +114,8 @@ function UserProvider({ children }: { children: React.ReactNode }) {
           type: response.ok ? "SET_USER" : "CLEAR_USER",
           payload: response.ok
             ? {
-                id: response.id ?? null,
-                username: response.username ?? null,
+                id: response._id,
+                username: response.username,
                 history: (response.history ?? []).map((item: any) => {
                   return { title: item.title, _id: item._id };
                 }),
@@ -155,7 +155,7 @@ function UserProvider({ children }: { children: React.ReactNode }) {
       notification.showSuccess(`${title} was pinned to sidebar`);
       dispatch({
         type: "PIN_GAME",
-        payload: { id, image, title },
+        payload: { _id : id, image, title },
       });
     } else {
       notification.showError(
@@ -173,7 +173,7 @@ function UserProvider({ children }: { children: React.ReactNode }) {
 
     if (response.ok) {
       notification.showSuccess("Game was successfully un-pinned");
-      dispatch({ type: "UNPIN_GAME", payload: { id } });
+      dispatch({ type: "UNPIN_GAME", payload: { _id : id } });
     } else {
       notification.showError(
         response.status === 401
@@ -233,7 +233,6 @@ function UserProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await deleteSession(state.id, ids);
-      console.log(result)
       if (result.ok) {
         dispatch({ type: "POP_SESSIONS", payload: ids });
         notification.showSuccess(result.message ?? "")
@@ -257,7 +256,6 @@ function UserProvider({ children }: { children: React.ReactNode }) {
     handleUnpin,
     logout,
     handleSessionPush: (session: { title: string; _id: string }) => {
-      console.log(session, state.history);
       dispatch({ type: "PUSH_SESSION", payload: session });
     },
     handleSessionPop,

@@ -74,7 +74,7 @@ export async function getUser(): Promise<{
   ok: boolean;
   status?: number;
   message?: string;
-  id?: string;
+  _id?: string;
   username?: string;
   image?: string;
   history?: { title: string; _id: string }[];
@@ -102,6 +102,8 @@ export async function getUser(): Promise<{
 
     const res: { status: number; message: string; data: any } =
       await handleResponse(response);
+    
+
     return {
       ok: true,
       ...res,

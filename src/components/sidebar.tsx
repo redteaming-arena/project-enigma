@@ -45,7 +45,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuShortcut,
   DropdownMenuGroup,
   DropdownMenuSubTrigger,
   DropdownMenuSub,
@@ -123,13 +122,13 @@ export function AppSidebar() {
               </SidebarMenuItem>
             </Link>
             {user.pinned.map(
-              (game: { id: string; image: string; title: string }) => {
+              (game: { _id: string; image: string; title: string }) => {
                 return (
                   <Link
-                    key={`games-${game.id}`}
-                    href={`/games/${game.id}`}
+                    key={`games-${game._id}`}
+                    href={`/games/${game._id}`}
                     prefetch={true}
-                    id={game.id}
+                    id={game._id}
                   >
                     <SidebarMenuItem
                       className={cn(
@@ -165,14 +164,14 @@ export function AppSidebar() {
                           <DropdownMenuContent side="right" align="start">
                             <DropdownMenuItem
                               onClick={async () => {
-                                await handleUnpin(game.id);
+                                await handleUnpin(game._id);
                               }}
                             >
                               <PinOff />
                               <span>Unpin</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
-                              <Link href={`/leaderboard/${game.id}`}>
+                              <Link href={`/leaderboard/${game._id}`}>
                                 <ChartColumn />
                                 <span>Leaderboard</span>
                               </Link>
@@ -192,14 +191,14 @@ export function AppSidebar() {
       <SidebarContent>
         <ScrollArea className=" -mt-3 h-[calc(100vh-10rem)]">
           <SidebarGroup>
-            {user.id && (
+            {(user.id && user.history.length > 0) && (
               <SidebarGroupLabel className="font-bold select-none cursor-default">
                 Recents
               </SidebarGroupLabel>
             )}
 
             <SidebarGroupContent className=" space-y-1">
-              {user.history.map((chat: { title: string; _id: string; }) => {
+              {user.history.slice(0, Math.min(10, user.history.length)).map((chat: { title: string; _id: string; }) => {
                 return (
                   <Link
                     href={`/c/${chat._id}`}
@@ -256,6 +255,7 @@ export function AppSidebar() {
 const SidebarDropDownMenu = () => {
   const { state: user, logout } = useUser();
   const router = useRouter();
+  console.log(user)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -343,7 +343,7 @@ export const SideBarCloseButton = () => {
   return (
     <Button
       className={cn(
-        "fixed z-10 transition-all duration-200 ease-in-out",
+        "fixed z-10 transition-all duration-200 ease-in-out z-20",
         // Mobile positioning and styling
         isMobile
           ? "top-4 left-4 bg-background/80 backdrop-blur-sm shadow-md hover:bg-background/90"

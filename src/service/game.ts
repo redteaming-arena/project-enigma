@@ -12,7 +12,6 @@ export async function getGameStream(skip: number = 0, include: number = 0): Prom
   const cached = GAMES_CACHE.get(cacheKey);
   // Return cached data if it's still valid
   if (cached && (now - cached.timestamp) / 1000 < CACHE_DURATION) {
-    // console.log("return cache games")
     return cached.data as Game[];
   }
   
@@ -57,7 +56,6 @@ export async function getGames(skip: number = 0, include: number = 0): Promise<G
     }
 
     const data = await response.json();
-    
     // Update cache
     GAMES_CACHE.set(cacheKey, {
       data,

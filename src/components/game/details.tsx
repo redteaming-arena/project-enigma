@@ -33,20 +33,22 @@ interface GameDetailsProps {
 export function GameDetails({ game }: GameDetailsProps) {
   const { state: user, handlePin, handleUnpin, isLoading } = useUser();
   const notification = useNotification();
+  
+  console.log(user.pinned, game)
   const [pinned, setPinned] = useState(
-    user.pinned.filter((e: { id: string }) => e.id == game.id).length != 0
+    user.pinned.filter((e: { _id: string }) => e._id == game._id).length != 0
   );
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     setPinned(
-      user.pinned.filter((e: { id: string }) => e.id == game.id).length != 0
+      user.pinned.filter((e: { _id: string }) => e._id == game._id).length != 0
     );
   }, [user]);
 
   const handlePlayNow = async () => {
-    const chat = await createChat(game.id);
+    const chat = await createChat(game._id);
     if (!chat.ok) {
       notification.showWarning(chat.error ?? "Could not create new Chat ");
       return;
@@ -78,7 +80,7 @@ export function GameDetails({ game }: GameDetailsProps) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Link href={`/leaderboard/${game.id}`} prefetch={true} >
+              <Link href={`/leaderboard/${game._id}`} prefetch={true} >
                 <Button
                   size="icon"
                   variant="ghost"
@@ -95,9 +97,9 @@ export function GameDetails({ game }: GameDetailsProps) {
               <Button
                 onClick={async () => {
                   if (!pinned) {
-                    await handlePin(game.id, game.image ?? "", game.title);
+                    await handlePin(game._id, game.image ?? "", game.title);
                   } else {
-                    await handleUnpin(game.id);
+                    await handleUnpin(game._id);
                   }
                 }}
                 size="icon"

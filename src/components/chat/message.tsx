@@ -56,8 +56,8 @@ const MessageRoot = React.forwardRef<HTMLDivElement, MessageProps>(
           "flex gap-3 p-1",
           "flex-row",
           variant === "assistant"
-            ? "bg-zinc-950 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-900/70 to-zinc-900/30"
-            : "w-fit bg-black",
+            ? "bg-zinc-950 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-900/70 to-zinc-900/30 border-[0.1rem] border-zinc-900"
+            : "w-fit bg-black border-0",
           "max-w-full overflow-hidden",
           className
         )}

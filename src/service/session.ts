@@ -31,7 +31,7 @@ export type GameSessionReadOnlyResponse =
   | GameSessionReadOnly & HandleErrorResponse;
 
 export interface GameSessionPublic {
-  id?: string | ObjectId;
+  _id?: string | ObjectId;
   user_id?: ObjectId | null;
   game_id?: ObjectId | null;
   judge_id?: ObjectId | null;
@@ -86,18 +86,17 @@ export async function getSession(
 ): Promise<GameSessionPublicResponse> {
   const cookieStore = await cookies();
   const authToken = cookieStore.get("sessionKey")?.value;
+  const cache = HISTORY_CACHE.get(session_id);
 
   if (!authToken) {
     return { ok: false, status: 401, message: "Token does not exist" };
   }
 
-  try {
-    // const cache = HISTORY_CACHE.get(key);
-    // if (cache && (now - cache.timestamp) / 1000 < CACHE_DURATION) {
-    //   console.log("cache")
-    //   return { ok: true, ...cache.data };
-    // }
+  if (cache !== undefined) {
+    return { ok : true, ...cache.data}
+  }
 
+  try {
     const response = await fetch(
       `${process.env.FRONTEND_HOST}/api/${session_id}/chat_conversation`,
       {
@@ -120,13 +119,12 @@ export async function getSession(
 
     const data = await handleResponse<GameSessionPublic>(response);
 
-    // console.log("session", data);
-    // if (data.outcome === "win" || data.outcome === "loss") {
-    //   HISTORY_CACHE.set(key, {
-    //     data,
-    //     timestamp: Date.now(),
-    //   });
-    // }
+    if (data.outcome === "win" || data.outcome === "loss") {
+      HISTORY_CACHE.set(session_id, {
+        data,
+        timestamp: Date.now(),
+      });
+    }
 
     return { ok: true, ...data };
   } catch (error) {
@@ -306,10 +304,7 @@ export async function concludeSessionGame(
 }
 
 // Get History
-export async function getRecents(
-  skip: number,
-  limit?: number
-): Promise<GameSessionRecentItemResponse> {
+export async function getRecents(): Promise<GameSessionRecentItemResponse> {
   const cookieStore = await cookies();
   const authToken = cookieStore.get("sessionKey")?.value;
 
@@ -319,9 +314,7 @@ export async function getRecents(
 
   try {
     const response = await fetch(
-      `${process.env.FRONTEND_HOST}/api/history?s=${skip}${
-        limit ? `&l=${limit}` : ""
-      }`,
+      `${process.env.FRONTEND_HOST}/api/history`,
       {
         method: "GET",
         headers: {
@@ -493,9 +486,16 @@ export async function deleteSession(
 
     const res = await handleResponse<MessageType>(response);
 
+    session_ids.forEach((session) => {
+      // delete from user cache so not callable
+      HISTORY_CACHE.delete(session);
+    });
+
     return { ok: true, ...res };
   } catch (err) {
     console.error("Error in getSessionHistory:", err);
     return { ok: false, error: "An unexpected error occurred" };
   }
 }
+
+
