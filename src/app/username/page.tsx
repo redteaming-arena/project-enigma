@@ -42,8 +42,8 @@ export default function UsernamePage() {
         dispatch({
           type: "SET_USER",
           payload: {
-            id: user.id ?? null,
-            username: user.username ?? null,
+            id: user._id,
+            username: user.username,
             history: user.history ?? [],
             pinned: user.pinned ?? [],
           },
