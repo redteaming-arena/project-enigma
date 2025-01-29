@@ -107,9 +107,6 @@ export default function Recent() {
       <div className="mt-4 space-y-5">
         <ScrollArea className="space-y-5">
           {user.history.map((item) => {
-            console.log(item.title)
-            console.log(item._id)
-
             if (
               (query.length === 0 || item.title?.includes(query)) &&
               item._id

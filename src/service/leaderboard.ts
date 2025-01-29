@@ -105,7 +105,6 @@ message: `HTTP error! status: ${response.status}`,
 }
 
 const data = await handleResponse<LeaderboardResponse>(response);
-console.log(data)
 return {ok : true, ...data};
 } catch(error) {
 return error as HandleErrorResponse;

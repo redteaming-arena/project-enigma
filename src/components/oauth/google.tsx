@@ -51,6 +51,7 @@ export const GoogleProvider = ({
         if (user.username === null) {
           router.push('/username')
         }
+        
         dispatch({
           type : "SET_USER",
           payload : {

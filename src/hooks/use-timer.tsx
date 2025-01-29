@@ -58,7 +58,6 @@ const useTimer = (initialSeconds: number): TimerHookReturn => {
       intervalId = setInterval(() => {
         setSeconds((prevSeconds) => {
           if (prevSeconds <= 1) {
-            // console.log(prevSeconds)
             setIsRunning(false);
             setIsComplete(true);
             return 0;

@@ -76,7 +76,6 @@ export const AuthForms = ({
         notification.showSuccess("Successfully Logged In");
         const user = await getUser();
         console.warn("User logged in to website")
-        console.log("loging ", user)
         dispatch({
           type : "SET_USER",
           payload : {
@@ -281,7 +280,7 @@ export const AuthForms = ({
       </div>
       {state == "username" && (
         <>
-          {/* <div className="relative">
+          <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t border-zinc-800"></span>
             </div>
@@ -290,10 +289,10 @@ export const AuthForms = ({
                 Or continue with
               </span>
             </div>
-          </div> */}
+          </div>
 
           {/* TODO: Remove after */}
-          {/* <GoogleProvider loading={isLoading} setIsLoading={setIsLoading} /> */}
+          <GoogleProvider loading={isLoading} setIsLoading={setIsLoading} />
         </>
       )}
     </>

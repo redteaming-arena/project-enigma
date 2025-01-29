@@ -306,7 +306,6 @@ export const ChatComponent = ({
 
             // Decode and append the chunk to the buffer
             buffer += decoder.decode(value, { stream: true });
-            console.log(buffer);
             const lines = buffer.split("\n");
             let content = "";
 

@@ -8,7 +8,6 @@ import Loading from "../loading";
 import Image from "next/image";
 
 function GameCardComponent({ game }: { game: Game }) {
-  console.log(game)
   return (
     <Link href={`/games/${game._id}`} key={game._id} prefetch={true}>
       <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 hover:scale-[1.02] bg-zinc-950 text-white">

@@ -44,7 +44,9 @@ export default function UsernamePage() {
           payload: {
             id: user._id,
             username: user.username,
-            history: user.history ?? [],
+            history: (user.history ?? []).map((item: any) => {
+              return { title: item.title, _id: item._id };
+            }),
             pinned: user.pinned ?? [],
           },
         });

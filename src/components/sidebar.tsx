@@ -255,7 +255,6 @@ export function AppSidebar() {
 const SidebarDropDownMenu = () => {
   const { state: user, logout } = useUser();
   const router = useRouter();
-  console.log(user)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
