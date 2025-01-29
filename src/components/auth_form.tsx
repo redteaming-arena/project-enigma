@@ -281,7 +281,7 @@ export const AuthForms = ({
       </div>
       {state == "username" && (
         <>
-          <div className="relative">
+          {/* <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t border-zinc-800"></span>
             </div>
@@ -290,9 +290,10 @@ export const AuthForms = ({
                 Or continue with
               </span>
             </div>
-          </div>
+          </div> */}
 
-          <GoogleProvider loading={isLoading} setIsLoading={setIsLoading} />
+          {/* TODO: Remove after */}
+          {/* <GoogleProvider loading={isLoading} setIsLoading={setIsLoading} /> */}
         </>
       )}
     </>
